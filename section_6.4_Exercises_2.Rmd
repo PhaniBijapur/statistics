@@ -1,0 +1,76 @@
+---
+title: "Exercises Chapter 6"
+section: "6.4"
+Exercise: "2", "9", "14", "19"
+author: "Monaliben Pansuriya (275672)",
+        "Rahul Bhunatar (276222)",
+        "Aiswarya Pulluttiparambil (276209)",
+        "Vaishanavi Chidambaram (275776)"
+date: "2024-01-07"
+output: html_document
+---
+
+## Exercise 2
+
+Those responsible for the FranSO study (Kemmler et al. (2017)) assumed for the
+sample size calculation of the primary endpoint (sarcopenia z-score), a difference
+of means of 1.0 and a standard deviation of 1.4. Calculate the sample size using
+Student’s t-test. Use a significance level of 5% and a power of 80%. How much does
+the sample size increase if you increase the power to 90%? The study ultimately
+included 33 respectively, 34 subjects per group. How large is the power of the
+study if you assume a sample size of 33 per group?
+
+## Answer
+
+To calculate the sample size using Student’s t-test, we can use the `power.t.test`
+function. 
+
+Given the assumptions of a difference of means of 1.0, a standard deviation of
+1.4, a significance level of 5%, and a power of 80%, we can calculate the sample
+size as follows:
+
+We perform the case number calculation with δ = 1.0, α = 1.4, σ = 0.05 and 1 - β = 0.8
+
+```{r}
+# Calculate sample size for 80% power
+power.t.test(delta = 1.0, sd = 1.4, sig.level = 0.05, power = 0.8)
+```
+
+In these calculation, a case number of 32 per group is sufficient to produce
+the expected difference with a power of 80% and an type 1 error of 5%.
+
+To calculate the sample size for 90% power, we can use the same function with the
+updated power value:
+
+We perform the case number calculation with δ = 1.0, α = 1.4, σ = 0.05 and 1 - β = 0.9
+
+```{r}
+# Calculate sample size for 90% power
+power.t.test(delta = 1.0, sd = 1.4, sig.level = 0.05, power = 0.9)
+```
+
+In these calculation, a case number of 42 per group is sufficient to produce
+the expected difference with a power of 90% and an type 1 error of 5%.
+
+Next, to determine the power of the study with a sample size of 33 per group,
+we can use the `power.t.test` function as follows:
+
+We perform the case number calculation with δ = 1.0, α = 1.4, σ = 0.05 and n = 33
+
+```{r}
+# Calculate power for a sample size of 33 per group
+power.t.test(n = 33, delta = 1.0, sd = 1.4, sig.level = 0.05)
+```
+
+In these calculation, we use a case number of n = 33. With complete data this
+leads to a power of approx 81%.
+
+By running these R commands, you can obtain the sample sizes and power calculations
+based on the given parameters and study design.
+
+
+## Exercise 9
+
+## Exercise 14
+
+## Exercise 19
