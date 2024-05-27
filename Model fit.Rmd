@@ -1,0 +1,520 @@
+---
+title: "Exercises Chapter 5"
+author: "Phaniraj Bijapur"
+date: "2023-12-02"
+output: html_document
+---
+
+## Exercise 6
+
+Assume that the log bilirubin values of ICU patients can be described by a normal distribution.
+
+  ICUData$logBili <- log10(ICUData$bilirubin)
+
+Calculate the ML estimator and compare the result with median and MAD as well as the RMX estimator (apply function roblox of package "RobLox" (Kohl (2019))). For the RMX estimator, assume 1 - 5% of erroneous data. Also determine the associated confidence intervals in each case applying bootstrap. Plot the data in the form of a histogram and add the three normal distribution densities with the estimated parameters. Validate the three models additionally with pp- and qq- plots.
+
+## Answer
+
+## Preparations
+
+First, we load the dataset.
+
+```{r}
+ICUData <- read.csv(file = "ICUData_Group2.csv", stringsAsFactors = TRUE)
+```
+
+Second, we load the required R packages.
+
+```{r}
+library(ggplot2)
+library(MKdescr)
+library(distrMod)
+library(qqplotr)
+library(RobLox)
+library(gridExtra)
+library(MKinfer)
+library(ROptEst)
+library(RobExtremes)
+library(MKpower)
+library(MKclass)
+library(rmx)
+library(MASS)
+library(boot)
+library(parallel)
+```
+
+
+Assume that the log bilirubin values of ICU patients can be described by a normal distribution.
+
+```{r}
+ICUData$logBili <- log10(ICUData$bilirubin)
+```
+
+In the first step, we compute the point estimates where we begin with the maximum
+likelihood estimator
+
+```{r}
+## Change output options
+distrModOptions(show.details = "minimal")
+## Define probability model
+model <- NormFamily()
+## Estimate parameters by ML
+MLE <- MLEstimator(ICUData$logBili, model)
+MLE
+```
+
+We get a mean of about 1.277 and an SD of about 0.3377.
+
+Next, we determine median and MAD.
+
+```{r}
+median(ICUData$logBili)
+mad(ICUData$logBili)
+```
+
+We get a median of about 1.210 and an MAD of about 0.2846. The results are almost
+identical to the ML estimates. That means, we have a symmetric data distribution 
+and no outliers, since outliers would increase the ML-estimate of the SD. It 
+also indicates that the normal distribution should be appropriate.
+
+As the last estimates we compute the RMX estimates.
+
+```{r}
+RMXE <- roblox(ICUData$logBili, eps.lower = 0.01, eps.upper = 0.05)
+RMXE
+```
+
+Again we get an estimate of the mean of about 1.227 and of the SD of about 0.3113.
+
+In the next step, we determine bootstrap confidence intervals.
+
+We again start with the ML estimator. We could use function normCI, but it
+would not give the ML estimator for SD. We use multicores to speed up the
+computations and only compute the bootstrap interval for method BCa. We 
+select BCa, since the sample size is quite large and we don't expect very 
+skewed distributions. As number of bootstrap samples we select 999 to save
+computation time.
+
+```{r}
+MLEst <- function(x, i){
+  res <- MLEstimator(x[i], ParamFamily = NormFamily())
+  c(estimate(res), diag(asvar(res)))
+}
+
+nr.cpus <- detectCores() - 1
+## bootstrap estimates
+boot.out <- boot(ICUData$logBili, statistic = MLEst, R = 999,
+                      parallel = "multicore", ncpus = nr.cpus)
+## bootstrap confidence interval for mean
+boot.ci(boot.out, index = c(1, 3), type = "bca")
+## bootstrap confidence interval for standard deviation
+boot.ci(boot.out, index = c(2, 4), type = "bca")
+```
+
+The estimated 95% confidence interval of the mean is [1.217, 1.347] and
+the respective confidence interval of the SD is [0.2904, 0.4049].
+
+Next, we compute bootstrap confidence intervals for median and MAD. In order
+to get comparable results, we again apply method BCa for determining the intervals.
+We use the default of 9999 replications.
+
+```{r}
+medianCI(ICUData$logBili, method = "boot", bootci.type = "bca")
+madCI(ICUData$logBili, method = "boot", bootci.type = "bca")
+```
+
+The estimated 95% confidence interval of the median is [1.149, 1.283] and 
+the respective interval of the MAD is [0.2123, 0.3885]. The intervals are 
+a little bit longer than in case of the ML estimates, which can be expected
+since median and MAD have higher standard errors. In addition, there is 
+a large overlap between the confidence intervals of the ML estimates and
+median and MAD.
+
+Finally, we determine the bootstrap confidence intervals for the RMX estimates.
+As before, we apply method BCa and use 999 bootstrap replicates and multicore 
+to speed up the computations.
+
+```{r}
+RMXEst <- function(x, i){
+  res <- roblox(x[i], eps.lower = 0.01, eps.upper = 0.05)
+  c(estimate(res), diag(asvar(res)))
+}
+
+nr.cpus <- detectCores() - 1
+## bootstrap estimates
+boot.out <- boot(ICUData$logBili, statistic = RMXEst, R = 999,
+                          parallel = "multicore", ncpus = nr.cpus)
+## bootstrap confidence interval for mean
+boot.ci(boot.out, index = c(1, 3), type = "bca")
+## bootstrap confidence interval for standard deviation
+boot.ci(boot.out, index = c(2, 4), type = "bca")
+```
+
+The 95% bootstrap confidence interval of the mean is [1.157, 1.307] and the 
+respective interval of the SD is [0.2527, 0.3837]. The intervals are very 
+similar to the intervals of the MLE estimates. Hence, there is a large 
+overlap also to the confidence intervals of median and MAD.
+
+Next, we visualize the estimated model densities in combination with the 
+empirical density and histogram.
+
+```{r}
+ggplot(ICUData, aes(x=logBili)) +
+  geom_histogram(aes(y=after_stat(density)), binwidth = 0.05, 
+                 fill = "darkgrey") +
+  geom_density(color = "orange") + ylab("Dichte") +
+  stat_function(fun = dnorm, args = list(mean = 1.277, sd = 0.3377),
+                color = "darkred", linewidth = 1.5) +
+  stat_function(fun = dnorm, args = list(mean = 1.210, sd = 0.2858),
+                color = "darkblue", linewidth = 1.5) +
+  stat_function(fun = dnorm, args = list(mean = 1.227, sd = 0.3113),
+                color = "darkgreen", linewidth = 1.5) +
+  annotate("text", x = 1.85, y = 5.0, col = "darkred",
+           label = "ML Estimator") +
+  annotate("text", x = 1.85, y = 4.5, col = "darkblue",
+           label = "Median and MAD") +
+  annotate("text", x = 1.85, y = 4.0, col = "darkgreen",
+           label = "RMX Estimator") +
+  ggtitle("Comparison of Estimated Models")
+```
+
+There is quite a good agreement between the empirical distribution and the 
+estimated models. The three estimated models are very similar and can only
+hardly be distinguished.
+
+In the last step, we perform pp- and qq-plots where we start with the 
+ML estimates.
+
+```{r}
+gg1 <- ggplot(ICUData, aes(sample = logBili)) + 
+  qqplotr::stat_pp_band(dparams = list(mean = 1.277, sd = 0.3377), 
+                        distribution = "norm") + 
+  qqplotr::stat_pp_point(dparams = list(mean = 1.277, sd = 0.3377),
+                         distribution = "norm") +
+  qqplotr::stat_pp_line() + 
+  xlab("Cumulative probability of the model") + 
+  ylab("Observed cumulative probability") + 
+  ggtitle("pp-Plot: ML Estimator")
+gg2 <- ggplot(ICUData, aes(sample = logBili)) + 
+  qqplotr::stat_qq_band(dparams = list(mean = 1.277, sd = 0.3377), 
+                        distribution = "norm", identity = TRUE) + 
+  qqplotr::stat_qq_point(dparams = list(mean = 1.277, sd = 0.3377),
+                         distribution = "norm") + 
+  qqplotr::stat_qq_line(dparams = list(mean = 1.277, sd = 0.3377), 
+                        distribution = "norm", identity = TRUE) + 
+  xlab("Model for log10 of bilirubin") + 
+  ylab("Observed log10 of bilirubin") + 
+  ggtitle("qq-Plot: ML Estimator")
+grid.arrange(gg1, gg2, nrow = 1)
+```
+
+We see a good agreement between the estimated model and the data in the pp- and 
+the qq-plot. No data points are outside of the 95% confidence bands.
+
+Next, we generate pp- and qq-plot of median and MAD.
+
+```{r}
+gg1 <- ggplot(ICUData, aes(sample = logBili)) + 
+  qqplotr::stat_pp_band(dparams = list(mean = 1.210, sd = 0.2858), 
+                        distribution = "norm") + 
+  qqplotr::stat_pp_point(dparams = list(mean = 1.210, sd = 0.2858),
+                         distribution = "norm") +
+  qqplotr::stat_pp_line() + 
+  xlab("Cumulative probability of the model") + 
+  ylab("Observed cumulative probability") + 
+  ggtitle("pp-Plot: Median and MAD")
+gg2 <- ggplot(ICUData, aes(sample = logBili)) + 
+  qqplotr::stat_qq_band(dparams = list(mean = 1.210, sd = 0.2858), 
+                        distribution = "norm", identity = TRUE) + 
+  qqplotr::stat_qq_point(dparams = list(mean = 1.210, sd = 0.2858),
+                         distribution = "norm") + 
+  qqplotr::stat_qq_line(dparams = list(mean = 1.210, sd = 0.2858), 
+                        distribution = "norm", identity = TRUE) + 
+  xlab("Model for log10 of bilirubin") + 
+  ylab("Observed log10 of bilirubin") + 
+  ggtitle("qq-Plot: Median and MAD")
+grid.arrange(gg1, gg2, nrow = 1)
+```
+
+Since the estimated parameters are almost identical to the ML estimates, the
+pp- and qq-plot look very similar. That is, we see a good agreement between 
+the estimated model and the data. Again, there is no data point outside the
+95% confidence bands.
+
+Lastly, we generate the pp- and qq-plot for the RMX estimates.
+
+```{r}
+gg1 <- ggplot(ICUData, aes(sample = logBili)) + 
+  qqplotr::stat_pp_band(dparams = list(mean = 1.227, sd = 0.3113), 
+                        distribution = "norm") + 
+  qqplotr::stat_pp_point(dparams = list(mean = 1.227, sd = 0.3113),
+                         distribution = "norm") +
+  qqplotr::stat_pp_line() + 
+  xlab("Cumulative probability of the model") + 
+  ylab("Observed cumulative probability") + 
+  ggtitle("pp-Plot: RMX Estimator")
+gg2 <- ggplot(ICUData, aes(sample = logBili)) + 
+  qqplotr::stat_qq_band(dparams = list(mean = 1.227, sd = 0.3113), 
+                        distribution = "norm", identity = TRUE) + 
+  qqplotr::stat_qq_point(dparams = list(mean = 1.227, sd = 0.3113),
+                         distribution = "norm") + 
+  qqplotr::stat_qq_line(dparams = list(mean = 1.227, sd = 0.3113), 
+                        distribution = "norm", identity = TRUE) + 
+  xlab("Model for log10 of bilirubin") + 
+  ylab("Observed log10 of bilirubin") + 
+  ggtitle("qq-Plot: RMX Estimator")
+grid.arrange(gg1, gg2, nrow = 1)
+```
+
+As before, there is a good agreement between the estimated model and the data.
+There is no data point outside the 95% confidence bands.
+
+In this specific case, all there estimators give very similar and hardly 
+distinguishable results. The mean is estimated as 1.277 in case of mean and 1.210
+in case of median and 1.227 in case of RMX. The estimated SD is 0.3377 in case of
+mean and 0.2846 i case of MAD and 0.3113 in case of RMX. In all cases there is a
+good agreement between the estimated model and the data.
+
+
+
+
+
+
+## Exercise 12
+
+Assume that the length of stay (LOS) of ICU patients can be described by a Gamma distribution. Calculate the ML, the CvM-MD, and the RMX estimator (apply function roptest of package "ROptEst" (Kohl and Ruckdeschel (2019)) and their asymptotic confidence intervals. For the RMX estimator, assume 1 - 5% of erroneous data. The RMX estimator will take some time to compute. Plot the data in the form of a histogram and add the three Gamma distribution densities with the estimated parameters. Validate the three models additionally with pp- and qq-plots.
+
+## Answer
+
+## Preparations
+
+First, we load the dataset.
+
+```{r}
+ICUData <- read.csv(file = "ICUData_Group2.csv", stringsAsFactors = TRUE)
+```
+
+Second, we load the required R packages.
+
+```{r}
+library(ggplot2)
+library(distrMod)
+library(gridExtra)
+library(ROptEst)
+library(RMixtComp)
+```
+
+In the first step, we compute the point estimates using Gamma distribution
+
+```{r}
+# Fit Gamma distribution using ML estimator
+Model <- GammaFamily()
+MLest <- MLEstimator(ICUData$LOS, Model)
+MLest
+```
+
+We get a scale of about 9.42 and an Shape of about 0.6738 for MLest using Gamma distribution.
+
+```{r}
+# Fit Gamma distribution using CvM-MD estimator
+MDest <- CvMMDEstimator(ICUData$LOS, Model)
+MDest
+```
+
+We get a scale of about 4.567 and an Shape of about 0.8246 for (CvM-MD) MDest using Gamma distribution
+
+```{r}
+# Fit Gamma distribution using RMX estimator
+RMXest <- roptest(ICUData$LOS, Model, 
+                  eps.lower = 0.01, eps.upper = 0.05, steps = 3)
+RMXest
+```
+
+We get a scale of about 4.313 and an Shape of about 0.8758 for RMXest using Gamma distribution
+
+
+Next, we determine asymptotic confidence intervals for the ML, the CvM-MD, and the RMX.
+
+```{r}
+distrMod::confint(MLest)
+distrMod::confint(MDest)
+distrMod::confint(RMXest)
+```
+
+We get a scale [6.264, 12.582] and shape [0.515, 0.832] for ML asymptotic confidence intervals, 
+We get a scale [2.708, 6.427] and shape [0.575, 1.074] for CvM-MD asymptotic confidence intervals 
+We get a scale [2.774, 5.852] and shape [0.65, 1.01] for RMX asymptotic confidence intervals is
+
+Next, we visualize the estimated model densities in combination with the 
+empirical density and histogram.
+
+```{r}
+ggplot(ICUData, aes(x = LOS)) +
+  geom_histogram(aes(y=after_stat(density)), binwidth = 5, 
+                 fill = "darkgrey") +
+  geom_density(color = "orange") + ylab("Dichte") +
+  stat_function(fun = dgamma, args = list(scale = 9.42, shape = 0.7),
+                color = "darkred", linewidth = 1.5) +
+  stat_function(fun = dgamma, args = list(scale = 4.57, shape = 0.82),
+                color = "darkblue", linewidth = 1.5) +
+  stat_function(fun = dgamma, args = list(scale = 4.31, shape = 0.88),
+                color = "darkgreen", linewidth = 1.5) +
+  annotate("text", x = 70, y = 0.050, col = "darkred",
+           label = "ML Estimator") +
+  annotate("text", x = 70, y = 0.040, col = "darkblue",
+           label = "CvM-MD Estimator") +
+  annotate("text", x = 70, y = 0.030, col = "darkgreen",
+           label = "RMX Estimator") +
+  ggtitle("Comparison of Estimated Models")
+```
+
+There is quite a good agreement between the empirical distribution and the 
+estimated models. The three estimated models are very similar and can only
+hardly be distinguished.
+
+In the last step, we perform pp- and qq-plots where we start with the 
+ML estimates.
+
+```{r, fig.width=9}
+gg1 <- ggplot(ICUData, aes(sample = LOS)) + 
+  qqplotr::stat_pp_band(dparams = list(scale = 9.42, shape = 0.7), 
+                        distribution = "gamma") + 
+  qqplotr::stat_pp_point(dparams = list(scale = 9.42, shape = 0.7),
+                         distribution = "gamma") +
+  qqplotr::stat_pp_line() + 
+  xlab("Cumulative probability of the model") + 
+  ylab("Observed cumulative probability") + 
+  ggtitle("pp-Plot: ML Estimator")
+gg2 <- ggplot(ICUData, aes(sample = LOS)) + 
+  qqplotr::stat_qq_band(dparams = list(scale = 9.42, shape = 0.7), 
+                        distribution = "gamma", identity = TRUE) + 
+  qqplotr::stat_qq_point(dparams = list(scale = 9.42, shape = 0.7),
+                         distribution = "gamma") + 
+  qqplotr::stat_qq_line(dparams = list(scale = 9.42, shape = 0.7), 
+                        distribution = "gamma", identity = TRUE) + 
+  xlab("Model for LOS") + 
+  ylab("Observed LOS Scores") + 
+  ggtitle("qq-Plot: ML Estimator")
+grid.arrange(gg1, gg2, nrow = 1)
+```
+
+We see a good agreement between the estimated model and the data in the pp- and the qq-plot. No data points are outside of the 95% confidence bands.
+
+Next, we generate pp- and qq-plot of median and MAD.
+
+```{r, fig.width=9}
+gg1 <- ggplot(ICUData, aes(sample = LOS)) + 
+  qqplotr::stat_pp_band(dparams = list(scale = 4.57, shape = 0.82), 
+                        distribution = "gamma") + 
+  qqplotr::stat_pp_point(dparams = list(scale = 4.57, shape = 0.82),
+                         distribution = "gamma") +
+  qqplotr::stat_pp_line() + 
+  xlab("Cumulative probability of the model") + 
+  ylab("Observed cumulative probability") + 
+  ggtitle("pp-Plot: CvM-MD Estimator")
+gg2 <- ggplot(ICUData, aes(sample = LOS)) + 
+  qqplotr::stat_qq_band(dparams = list(scale = 4.57, shape = 0.82), 
+                        distribution = "gamma", identity = TRUE) + 
+  qqplotr::stat_qq_point(dparams = list(scale = 4.57, shape = 0.82),
+                         distribution = "gamma") + 
+  qqplotr::stat_qq_line(dparams = list(scale = 4.57, shape = 0.82), 
+                        distribution = "gamma", identity = TRUE) + 
+  xlab("Model for LOS") + 
+  ylab("Observed LOS Scores") + 
+  ggtitle("qq-Plot: CvM-MD Estimator")
+grid.arrange(gg1, gg2, nrow = 1)
+```
+
+Since the estimated parameters are almost identical to the ML estimates, the
+pp- and qq-plot look very similar. That is, we see a good agreement between 
+the estimated model and the data. Again, there is no data point outside the
+95% confidence bands.
+
+Lastly, we generate the pp- and qq-plot for the RMX estimates.
+
+```{r, fig.width=9}
+gg1 <- ggplot(ICUData, aes(sample = LOS)) + 
+  qqplotr::stat_pp_band(dparams = list(scale = 4.31, shape = 0.88), 
+                        distribution = "gamma") + 
+  qqplotr::stat_pp_point(dparams = list(scale = 4.31, shape = 0.88),
+                         distribution = "gamma") +
+  qqplotr::stat_pp_line() + 
+  xlab("Cumulative probability of the model") + 
+  ylab("Observed cumulative probability") + 
+  ggtitle("pp-Plot: RMX Estimator")
+gg2 <- ggplot(ICUData, aes(sample = LOS)) + 
+  qqplotr::stat_qq_band(dparams = list(scale = 4.31, shape = 0.88), 
+                        distribution = "gamma", identity = TRUE) + 
+  qqplotr::stat_qq_point(dparams = list(scale = 4.31, shape = 0.88),
+                         distribution = "gamma") + 
+  qqplotr::stat_qq_line(dparams = list(scale = 4.31, shape = 0.88), 
+                        distribution = "gamma", identity = TRUE) + 
+  xlab("Model for LOS") + 
+  ylab("Observed LOS Scores") + 
+  ggtitle("qq-Plot: RMX Estimator")
+grid.arrange(gg1, gg2, nrow = 1)
+```
+
+As before, there is a good agreement between the estimated model and the data.
+There is no data point outside the 95% confidence bands.
+
+
+
+
+
+
+
+## Exercise 20
+
+In the European Union, a disease is said to be rare when the incidence is less than 1 in 2000 persons. The incidence rate per year of sarcoidosis is about 5-60 cases per 100,000. We assume that this is a symmetrical 95% confidence interval for the incidence rate. The expected value (midpoint of the interval) is 32.5
+cases per 100,000 inhabitants. The length of the confidence interval is 55 cases per 100,000 population. Determine the sample size of how many subjects would have to be included in a study to confirm this asymptotic confidence interval. Use the same values for calculating the number of cases using the Clopper-Pearson and Agresti-Coull interval.
+
+
+## Answer
+
+This formula is derived from the general formula for the estimate of error in estimating a population proportion:
+
+E = z(1-α/2) * √((p*(1-p))/n)
+
+n = (z(1-α/2)^2 * p*(1-p)) / E^2
+
+n is the sample size, Z is the z-score corresponding to the desired confidence level, p is the expected value (interval),
+E is the length of interval.
+
+
+Apparently, the estimate error varies with the confidence level 1 - α, the estimated probability p̂ and the sample size n. 95% confidence interval; that is, we get for z(1-α/2) = z0.975
+
+```{r}
+qnorm(0.975)
+```
+
+
+```{r}
+# Calculate the required sample size using asymptotic interval
+sample_size = (1.96^2 * 0.000325 *(1-0.000325)) / (0.00055/2)^2
+sample_size
+```
+
+we got 16504 subjects would have to be included in a study to confirm this asymptotic confidence interval.
+
+
+
+calculate the required sample size using the Clopper-Pearson interval.
+
+```{r}
+# number of cases using the Clopper-Pearson interval
+ssize.propCI(0.000325 , width = 0.00055 , method = "clopper-pearson")
+```
+
+we got 19975 cases using the Clopper-Pearson.
+
+
+
+calculate the required sample size using the Agresti-Coull interval.
+
+```{r}
+#number of cases using the Agresti-Coull interval
+ssize.propCI(0.000325 , width = 0.00055 , method = "agresti-coull")
+```
+
+we got 16500 cases using the Agresti-Coull.
