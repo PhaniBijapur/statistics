@@ -1,2 +1,2 @@
-# statistics
-Statistical analysis of ICU Patients data for ouderstanding relation between variable and quality of data
+# statistical analysis
+This project involves conducting a statistical analysis of ICU patient data to understand the relationships between variables and assess the quality of the data.
