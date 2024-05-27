@@ -1,0 +1,651 @@
+---
+title: "Affymetrix Microarray Workflow"
+author: "RAMZAN ALI
+date: "May 2024"
+output:
+  rmarkdown::html_document:
+    toc: true
+    number_sections: true
+    theme: united
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+## setup für die Chunks
+knitr::opts_chunk$set(echo = TRUE, error = TRUE)
+```
+
+
+# Introduction
+Using the 2005 experiment "Comparison of Human and Non-Human Primate Gene Expression Profiles," dataset GSE2634 demonstrated that gene expression profiling of non-human primates (NPH) with human gene chips is possible. 
+
+Non-human primates are important models for the development of prophylaxis, therapeutics and diagnostics against chemical warfare agents. However, gene expression profiling in these nonhuman primates is complicated by the fact that their genomes have not yet been fully sequenced and by the lack of commercially available oligonucleotide microarrays (gene chips). 
+
+In the experiment, whole blood RNA from each species was isolated and used to make gene chip probes. Hybridization of the NHP samples with human gene chips (Affymetrix Human U133 Plus 2.0) resulted in a number of transcripts comparable to human samples. Statistical analysis demonstrated the reproducibility of the metrics used for quality control of the gene chips within species; comparison between the NHP and human species showed little significant difference in the quality and reproducibility of the data obtained with the human gene chips. The expression profiles of each species were compared using principal component analysis (PCA) and hierarchical clustering to determine the similarity of expression profiles within and between species. 
+
+The results showed that human gene chips are useful for expression profiling of NHP samples and provide a basis for developing tools to compare gene expression profiles of humans and NHP.
+
+For the sake of clarity, eight of the total 17 samples are analyzed below, referring to samples from three different monkey species and humans. The eight arrays refer to four samples each from the two monkey species African green monkey (Chlorocebus aethiops) and cynomologus macaque (Macaca fascicularis).
+
+
+# Import of Data
+
+The data can be detected as data set GSE2634 in the Gene Expression Omnibus:
+https://www.ncbi.nlm.nih.gov/geo/. The direct link is the following:
+https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE2634&format=file
+
+The files are now unpacked into a subfolder named "Data". 
+Then all files except GSM50690.CEL.gz, GSM50691.CEL.gz,
+..., GSM50697.CEL.gz are removed.
+
+
+```{r}
+library(affy)
+```
+
+We start with reading in the data. 
+
+```{r, cache = TRUE}
+## List CEL files
+FileNames <- list.files("./Data/", full.names = TRUE)
+## Import CEL files
+affyData <- ReadAffy(filenames = FileNames)
+affyData
+```
+
+We get an AffyBatch with 54675 genes of 8 samples.
+
+
+# Quality Control
+
+```{r, eval=FALSE}
+library(arrayQualityMetrics)
+arrayQualityMetrics(affyData, outdir = "QC", force = TRUE, 
+                    do.logtransform = TRUE)
+```
+
+The quality report refers to the data before pre-processing and is therefore intended to provide an initial overview of the quality of the data, although "final" statements can only be made after pre-processing. 
+
+A general overview is detected at the beginning of the report. There are six criteria according to which the individual arrays are evaluated in terms of their quality. Since there is no check mark anywhere in the table, none of the arrays appear to be conspicuous; thus, the quality of the data appears to be good at first glance. The criteria are explained in more detail below with the help of figures.
+
+Figure 1: Distances between arrays.
+The coloring shows the arrays in a range between blue (no spacing/ 0.0) and yellow (large spacing 1.2). In general, all arrays should have a small spacing. The smaller the spacing, the higher the similarity, and it is assumed that the similarity is high since only a few genes are affected by the biology and there is no change in most genes. If an array deviates, it could be a sign that there is probably a quality problem.
+In Fig. 1, it can be seen that array 4 and array 5 have higher distances (yellow).
+
+Figure 2: Outlier detection for Distances between arrays.
+Here we analyze how conspicuous the critical distance (mentioned in Fig. 1) is; since the distances are all below the conspicuity threshold, there is no conspicuous outlier and everything is within the expected fluctuations.
+
+Figure 4: Boxplots.
+The value distribution should be similar for all arrays due to the problem already described in Fig. 1. Therefore, the boxplots should also all look similar. However, since we are dealing with raw data, there may be some variation. However, the box length and the whisker length should be approximately the same overall; this is reasonably satisfied. Only the boxplots 4 and 5 are somewhat conspicuous.
+
+Figure 5: Outlier detection for boxplots.
+The outlier analysis now checks whether a boxplot is really conspicuous. The figure shows that boxplots 4 and 5 are the most conspicuous, but not so conspicuous that there is a problem.  
+
+Figure 7: Standard deviation versus rank of mean.
+The figure shows the dependence of mean and standard deviation (SD). A logarithmic transformation of the raw data, i.e. a variance-stabilizing and normalizing transformation, is already performed here. The picture is important especially after preprocessing: the SD on the y-axis should be as independent from the mean as possible; if one wants to use classical statistical methods, it is assumed that the SD or the variance is homoscedastic/constant.
+Here in Fig. 7 this condition is not yet completely given; the red line (median line) shows that at the end with higher mean intensities also the variance becomes higher, which speaks for a slight heteroscedasticity. Thus, the variances are not yet homogeneous. After preprocessing the data, the result should be improved.
+
+Figure 8: Relative Log Expression (RLE).
+It would be desirable for the boxes to all be around zero; this is given here. If the boxes were away from zero or if they were far apart, this could indicate a quality problem. Only array 4 seems to be more conspicuous.
+
+Figure 9: Outlier detection for Relative Log Expression (RLE).
+The figure confirms that there are no anomalies with respect to the RLE (not even with respect to array 4).
+
+Figure 10: Normalized Unscaled Standard Error (NUSE).
+The standard error is basically the SD of the mean and this is normalized and unscaled; here you want values that are close to 1. So the boxes should be at 1. Boxes 3 and 4 are noticeable in this regard.
+
+Figure 11: Outlier detection for the normalized unscaled standard error (NUSE).
+The figure shows that even the somewhat more conspicuous boxes (3 and 4) are well within the expected fluctuations.
+
+Figure 12: RNA digestion plot
+Here the data has already been processed and background correction has already been applied. The blue lines should be as uniform as possible; each blue line represents an array. You can see here that the blot is not working properly: Normally, when you hover over the array, you should get an indication on the right side which array it is; from the image, you can't identify the one array that is a bit more noticeable (towards the top). But this field also appears to be in the image. So there is no indication that the RNA was outside the frame.
+
+Figure 13: Perfect matches and mismatches.
+There are samples that perfectly match the sequence to be measured (PM), and there are samples that do not match (MM). In fact, the latter do not match the sequence being searched for at only one location.
+The blue curve coming from PM should be higher since a match usually generates more hybridization. More signal is generated when a matched sequence is detected than when it is not a complete match. These are density plots: Most of the density is 6-7; however, this is only the background. The latter increases to 6, 7, or 8, and from about 8 there is a difference between blue and gray (PM and MM). This is where expression contributes. This is the part of the probe sets where something biological is happening. So you can see that nothing is happening in the majority of the samples. The other samples need to be tracked down and evaluated in terms of expression.
+
+Figure 14: MA plots.
+M is the difference of the log values and A is the mean of the log intensities.
+On the x-axis one sees the mean intensity. Towards the right, the intensity increases, and towards the top (y-axis), a change or log-fold change can be seen. An ideal MA blot would be array 6: the dark blue cloud is the background; there are many points forming a compact point cloud. No change is detected here (for probe sets with low logarithmic intensity in the range of 6 to 8). Beyond that, a fan structure should be seen next to it. These are the points you want to detect since a biological change is occurring here. They show a change in log intensity. For example, unlike box 6, box 5 doesn't look good because the point cloud is shifted. However, these are still the raw log values, so you can assume that some improvement can still be achieved with preprocessing. You can also see the worst value D (for Distance) for field 5, which is 0.12, while for field 6 it is 0.0.
+
+Figure 15: Outlier detection for MA plots.
+From the figure it can be seen that all MA plots (also array 5 with D=0.12) are in the frame, since the critical limit is 0.15.
+
+Figure 16: Spatial distribution of M.
+This figure shows the spatial distribution of M values/feature intensities. You can see stripes due to the photolithography. Now we look at the fluorescence signals from the array. The yellow dots represent the signal; light is emitted here. So you have a real image of the array in front of your eyes, processed in a blue-yellow tone. Array 7 has a small dot with streaks. The arrays are washed several times. If the washing steps are not clean, for example, something may run (for example, due to water drops). Here the intensities are distorted. One must assume that the values in this area are too high. But this is altogether, as the figure shows, seen on the whole array, only a small area. Therefore, one can assume that the array is okay.
+
+Figure 17: Outlier detection for Spatial distribution of M.
+The figure shows the outlier image with respect to the spatial distribution of M values. There are no anomalies and the values are all clearly in the image. 
+
+
+# Preprocessing
+
+Loading the required packages:
+
+```{r}
+library(gcrma)
+library(vsn)
+library(RobLoxBioC)
+library(plier)
+```
+
+Implementation of pre-processing.
+Objectives: 
+- Reduction of technical variability
+- (approximate) normal distributions with constant variances.
+
+We use 5 different algorithms to preprocess our data (RMA, GCRMA, VSNRMA, MAS 5.0 and PLIER). The most suitable procedure is then selected.
+
+```{r, cache = TRUE}
+affyData.rma <- rma(affyData)
+affyData.gcrma <- gcrma(affyData)
+affyData.vsnrma <- vsnrma(affyData)
+affyData.mas5 <- robloxbioc(affyData, normalize = TRUE)
+affyData.plier <- justPlier(affyData, normalize = TRUE)
+```
+
+
+# Quality Control of Preprocessed Data
+
+Mean-Sd plots: Check constant variance/SD.
+
+```{r}
+library(vsn)
+meanSdPlot(affyData.rma)
+meanSdPlot(affyData.gcrma)
+meanSdPlot(affyData.vsnrma)
+meanSdPlot(log2(exprs(affyData.mas5)))
+meanSdPlot(affyData.plier)
+```
+
+RMA procedure: Little improvement has been made. The red median line increases towards the end. Thus, at high intensities, the variability also increases. Consequently, there is still a slight heteroskedasticity of the data. Looking at the scale of the SD, it ranges approximately between 0.1 and 0.5.
+
+GCRMA: Here, too, the variability increases at the end. If we look at the scale, we see that the SD ranges between approximately 0 and 0.8. We therefore see a somewhat higher variability here than in the RMA method.
+
+VSNRMA: Here, too, the line rises at the end. However, this is relatively constant over a long range. If you look at the scale of the SD, it is approximately between 0.1 and 0.4. Thus, you can see that this is a lower variability than the previous procedures. 
+Two very strong procedures are combined here. This is generally good when the data quality is somewhat poorer/when you have a lot of technical variability. The procedure corrects strongly and there is a possibility that too much variability is taken out.
+
+MAS 5.0 procedure: The median line is relatively constant over a large range, but increases towards the end. Overall, the structure here is somewhat different from the previous procedures and the variability is also not small - we are here, compared to the VSNRMA procedure, at about 0.3 to 0.7 in magnitude. 
+
+Plier process: Due to the corrections the image is turned upside down and now there is a high variability at the low values. Reason: When performing corrections (background corrections etc.) the intensity is shifted towards 0 and the logarithm turns numbers that are very small/go towards 0 into large, negative numbers; I.e. this large variability is probably an effect of the logarithm; When finally the SD is calculated, high values arise again, which finally means an artifact.
+The problem, which is still present here, is that when looking at the data, all the background signals are still there. In the back (left) are probably background signals. If these were omitted, you would see a relatively constant variance in the signals going to the front.
+
+
+Calculation of Pearson correlations.
+
+```{r}
+library(MKomics)
+cor.mas5 <- cor(log2(exprs(affyData.mas5)))
+cor.rma <- cor(exprs(affyData.rma))
+cor.gcrma <- cor(exprs(affyData.gcrma))
+cor.plier <- cor(exprs(affyData.plier))
+cor.vsnrma <- cor(exprs(affyData.vsnrma))
+```
+
+Plot of similarity: detection/identification of outliers.
+Increase of similarity by preprocessing.
+
+```{r}
+corPlot2(cor.mas5, minCor = 0.75, labels = pData(affyData)[,1], title = "MAS 5.0")
+corPlot2(cor.rma, minCor = 0.85, labels = pData(affyData)[,1], title = "RMA")
+corPlot2(cor.vsnrma, minCor = 0.80, labels = pData(affyData)[,1], title = "VSN-RMA")
+corPlot2(cor.gcrma, minCor = 0.85, labels = pData(affyData)[,1], title = "GC-RMA")
+corPlot2(cor.plier, minCor = 0.50, labels = pData(affyData)[,1], title = "PLIER")
+```
+
+Figure MAS 5.0: 
+The figure shows a correlation matrix; this is symmetrical, i.e. everything is mirrored at the green angle bisector. A green square is visible on the right. This consists of 4 arrays reflecting exactly one group of NHPs. Since this group has consistently green values, there is a high correlation between the arrays (in the range 0.93-0.95) and the group is therefore quite homogeneous. On the other hand, the top left square shows higher heterogeneity in the second group; This second monkey species therefore appears to be less similar.
+The squares beyond the diagonals describe the two groups to each other; Since these are more in the red-orange range, there are many differences between the first and second groups.
+
+Figure RMA:
+Here, generally less red is detected than in the MAS 5.0 procedure, i.e. the preprocessing has worked better. The second group is again very homogeneous, but the first group is also somewhat more homogeneous. Again, there are some differences between the two monkey species, as can be seen in the squares beyond the diagonals. 
+Here, not only is the coloring different, but the values are different as well: red is at 0.85, while MAS 5.0 drops to values as low as 0.71. Here, the arrays have become much more similar, and this is what one usually wants to achieve since it is assumed that the majority of sequences will not respond. With a whole-genome array like this, one would expect very high correlations in the green. This is certainly confirmed here since the correlations within groups are well above 0.9.
+
+Figure VSNRMA: 
+The minimum correlations are again slightly lower here (at 0.8). Otherwise, there is not much difference between RMA and VSNRMA; only in the scales, i.e., the RMA procedure aligns slightly better than the VSNRMA procedure.
+
+Figure GCRMA:
+The figure is similar to the VSNRMA figure. (Similar result because the RMA procedures are related).
+
+Figure PLIER: 
+Here one sees significantly lower similarities. The second group is relatively homogeneous, but not the first group. In terms of similarities, the PLIER method is not good; that is, it aligns the least.
+
+Mean-Sd plot and similarity plots tend to favor RMA procedure.
+
+```{r}
+## range = 0: whiskers to most extreme data points
+boxplot(log2(exprs(affyData.mas5)), range = 0, main = "MAS 5.0")
+boxplot(exprs(affyData.rma), range = 0, main = "RMA")
+boxplot(exprs(affyData.gcrma), range = 0, main = "GC-RMA")
+boxplot(exprs(affyData.vsnrma), range = 0, main = "VSN-RMA")
+boxplot(exprs(affyData.plier), range = 0, main = "PLIER")
+```
+
+MAS 5.0 Figure:
+The procedure is usually not so good in these alignments because it analyzes each array individually, which has certain disadvantages; The boxplots are not so similar but they are at least at a similar level/height; You can see that boxplot 4 and 5, which were always conspicuous, are conspicuous here as well.
+
+RMA mapping:
+Much better result than Mas 5.0. since all arrays are taken together; the distribution of the different values is perfectly aligned.
+
+GCRMA Figure:  
+Similar to RMA, but on a smaller scale.
+
+VSN-RMA Figure: 
+Again similar, but with a smaller variability.
+
+PLIER Figure:
+Alignment by itself works, but effect: PLIER transformation produces clearly negative values; the large SDs then occur in the lower area.
+
+Box and whisker plots argue for RMA and VSN-RMA.
+
+
+# (Unspecific) Filtering
+
+Filtering/ General goal: Eliminate or reduce false positives due to statistical effects resulting from very large datasets.
+
+Non-specific filtering: information about the biological groups is omitted. Filtering out intrinsically uninteresting variables without using the experimental design/biological groups.
+
+Further without the results of plier. With plier a filtering with signal intensity and signal variability would have to be performed.
+MAS 5.0 results are also not followed up. 
+
+Non-specific filtering with SD, because SD represents variance and variance represents information. (The more variance the more information.) Because the preprocessing has already taken place, one can assume that the SD is now primarily the biological SD, i.e. the technical SD only contributes marginally.
+
+```{r}
+library(genefilter)
+SD.rma <- rowSds(exprs(affyData.rma))
+SD.gcrma <- rowSds(exprs(affyData.gcrma))
+SD.vsnrma <- rowSds(exprs(affyData.vsnrma))
+```
+
+Graphical representation of the SDs.
+
+```{r}
+boxplot(list(RMA = SD.rma, GCRMA = SD.gcrma, VSNRMA = SD.vsnrma),
+        range = 0)
+```
+
+Boxplots of the SD: For RMA you see the largest SD; For GCRMA the median is at the bottom of the box, i.e. the box is relatively short. Up to the upper edge of the box are 75% of the values; Thus, the SDs are relatively small here.
+With VSNRMA (this confirms the picture of the Mean SD Plot) everything is very compressed; little biological variability remains; Possibly some overcorrection here (due to the combination of two strong preprocessing methods).
+
+Image would argue for RMA or GCRMA.
+
+25% of the genes with the highest variability/information are selected.
+Reason: No biological influence is detected for most genes, so 75% are discarded.
+
+```{r}
+cut.rma <- quantile(SD.rma, prob = 0.75)
+RMA.fi <- exprs(affyData.rma)[SD.rma > cut.rma,]
+cut.gcrma <- quantile(SD.gcrma, prob = 0.75)
+GCRMA.fi <- exprs(affyData.gcrma)[SD.gcrma > cut.gcrma,]
+cut.vsnrma <- quantile(SD.vsnrma, prob = 0.75)
+VSNRMA.fi <- exprs(affyData.vsnrma)[SD.vsnrma > cut.vsnrma,]
+```
+
+Once again, brief quality control to select the most appropriate preprocessed dataset for statistical analysis.
+
+```{r}
+meanSdPlot(RMA.fi)
+meanSdPlot(GCRMA.fi)
+meanSdPlot(VSNRMA.fi)
+```
+
+RMA Figure:
+Variance still increases a bit toward the end.
+GCRMA Figure:
+Median line also increases, even more from trend than RMA.
+VSNRMA Figure:
+Significant increase at the end.
+
+You still have a slight heteroskedasticity in the data; not uncommon, only extremely rarely succeeds in removing it completely.
+
+Similarity of the arrays.
+
+```{r}
+cor.rma <- cor(RMA.fi)
+cor.gcrma <- cor(GCRMA.fi)
+cor.vsnrma <- cor(VSNRMA.fi)
+corPlot2(cor.rma, minCor = 0.7, labels = pData(affyData)[,1], title = "RMA")
+corPlot2(cor.gcrma, minCor = 0.78, labels = pData(affyData)[,1], title = "GC-RMA")
+corPlot2(cor.vsnrma, minCor = 0.78, labels = pData(affyData)[,1], title = "VSN-RMA")
+```
+
+Overall, all the figures look very similar again, but the overall similarity has decreased somewhat everywhere.
+Reason: 75% of the data were omitted; the probe sets that are now left are those that are ultimately assumed to have biological activity.
+
+Decision to go with RMA since Mean-SD plot looks most homogeneous.
+
+
+# Statistical Analysis
+
+Reading the information about the samples.
+Now we want to compare the two monkey species on the basis of their gene expression.
+
+```{r}
+group <- factor(c(rep("A1", 4), rep("A2", 4)))
+```
+
+The Wilcoxon-Mann-Withney rank-sum U test was chosen for the analysis because you have two groups (small groups 4 vs. 4). With two-group comparison, variance homogeneity/homoskedasticity is only conditionally satisfied. Therefore one uses Wilcoxon-Mann-Withney test: With it one can compare the location of two groups (or more inaccurately: compare median between two groups). The test is a rank test, not a parametric test. The Wilcoxon-Mann-Withney test can be found in the exactRankTest package.
+
+Also, you define a function because you can't look at 13669 test results. We are dealing with high-dimensional, complex data. Therefore, one must try to automate, but without losing essentials. Therefore one defines the function wfun = small auxiliary function, in which the Wilcoxon-Mann-Withney test is calculated; however, not the entire test is stored and returned, but only the p-value. So one looks at first only at the significance.
+
+```{r}
+library(exactRankTests)
+wfun <- function(x, g){ 
+  wilcox.exact(x~g)$p.value
+}
+wilcox.pval <- apply(RMA.fi, 1, wfun, g = group)
+```
+
+Histogram of p-values.
+
+```{r}
+hist(wilcox.pval, breaks = seq(from = 0, to = 1, by = 0.01))
+```
+
+Histogram of p-values is a quality check, which gives information about whether you still have technical effects. Here the histogram of the p-values does not look good.
+
+Below are the p-values (probabilities between 0 and 1). The first bar is very high and is below 5 percent, which would actually be good. So you might think that you have success, so these just under 5000 tests here/probe sets that were looked at have a significant result. However, we see that there are only certain p-values (in the form of bars), so there is no continuous, complete progression of p-values from 0 to 1 visible. Thus, it is clear that the Wilcoxon-Mann-Withney test does not work for groups of 4 versus 4. (For these non-parametric tests one rather needs groups of 10 against 10, for example).
+
+At the first moment it looks good (you have about 5000 significant results), but you have not yet done a p-value adjustment - this must be done to keep control over the false positives. This can be done with the following package multtest (for multiple testing).
+
+
+Adjusting the p-values for multiple testing.
+
+```{r}
+library(multtest)
+wilcox.pval.adj <- mt.rawp2adjp(wilcox.pval)
+colSums(wilcox.pval.adj$adjp < 0.05)
+```
+
+The adjusted p-values are therefore calculated; several methods are used for this. We look to see how many p-values are below 5 percent - these are then the significant values. After the adjustment, however, zero remains, i.e. there are no significant differences after adjusting the p-values!
+
+Therefore, the Welch t-test is now used as an alternative. (The T test compares the means of normal distributions and the Welch t test allows the groups to have different variances).
+We have slight heteroskedasticity, so it is obvious that we choose a test where the groups are allowed to have different variances. (If we were to take the classical, student T test, the variances would have to be constant). 
+
+
+```{r}
+tfun <- function(x, g){
+  t.test(x~g)$p.value
+}
+t.pval <- apply(RMA.fi, 1, tfun, g = group)
+```
+
+Histogram of p-values.
+
+```{r}
+hist(t.pval, breaks = seq(from = 0, to = 1, by = 0.01))
+```
+
+The histogram is now ideal-typical (unlike the Wilcoxon-Mann-Withney test, where there were only a few bars). We see here a high bar at the beginning with small p-values, which speaks for a biological difference. This then goes down.
+From the histogram you could theoretically see if there were technical problems (which doesn't seem to be the case here) - you would see that if the histogram went up again at the back. Then you might have some batch effects, i.e. group effects inside (or the histogram would be low at the beginning and high towards the end).
+
+
+Adjusting the p-values for multiple testing.
+
+```{r}
+t.pval.adj <- mt.rawp2adjp(t.pval)
+colSums(t.pval.adj$adjp < 0.05)
+```
+
+Again, one has to adjust the p-values. This also works here; there are no problems. We have a similar number of significant results (4871) as in the Wilcoxon-Mann-Withney test (4868); we see that a few procedures bring only very few differences (4). However, it cannot be assumed that there are only 4 positive results, so family wise error rate procedures do not work here, these are the very conservative adjustment procedures used in clinical studies, where you do not have about 13000 variables but e.g. 2, 3 or 4 (then these are the correct procedures).
+For gene expression and omics data, other methods have been developed specifically, the false discovery rate methods: BH (Benjamini Hochberg, or the adaptive ABH and TSBH procedures).
+BH is the classical false discovery rate. This would mean that we found 1329 significant differences.
+
+BY (Benjamini-Yekutieli) should lie between the family wise error rate and the BH method; here, however, the value is surprisingly 0; actually, this should not happen. This procedure could still be improved here, in the worst case at least 4 should come out as a result. Thus the procedure is not yet completely optimal in the computation here. 
+
+Use of a moderated T-test.
+(T tests are nowadays not the standard for omics data but gold standard: Empirical base approach or moderated tests).
+Empirical base approach or moderated T test starts at the denominator: We assume that we have a fairly homogeneous variance after preprocessing, i.e. that variance/SD is constant over all probe sets one has left. In the T test, one needs an estimate of the SD for the denominator; Since all genes have more or less the same SD, all genes can be used to estimate the SD; So the SD is not estimated on 4 versus 4 values, i.e. 8 values, but on 8 times circa 13000 genes that one has. So one can have more accurate estimate of SD. The power (more differences) of the test will be better. This approach is implemented in the package limma.
+
+```{r}
+library(limma)
+library(MKomics)
+res <- mod.t.test(x = RMA.fi, group = group)
+mod.t.pval.adj <- mt.rawp2adjp(res$p.value)
+colSums(mod.t.pval.adj$adjp < 0.05)
+```
+
+Results: For p-values without adjustment we are at 5950, compared to 4871 before; I.e. we have again more than 1000 differences more found by this approach and also after adjustment: for BH we are left with 3783; Significantly more than 1329.
+So, in fact, the moderated T-test has more power/significant differences than the classical T-test or the Welsh T-test we used.
+
+
+Volcano plot for the results of the moderated t-test.
+
+```{r}
+library(MKinfer)
+volcano(res$`difference in means`, pval = res$adj.p.value, 
+        effect0 = 0, effect.low = -1, effect.high = 1, 
+        alpha = 0.25, xlab = "log2-fold Change (log2-FC)",
+        ylab = expression(paste(-log[10], "(adj. p Value)")))
+```
+
+X-axis: Effect strength.
+Log 2-fold change, i.e. the log fold change (FC) is plotted here. (Log Fold Change is a measure of the effect: the greater the Log FC, the greater the effect, i.e. the further to the right or to the left, the stronger the effect or the greater the biological difference, i.e. probe sets to the left or to the right are of particular interest; the center is of no interest because there is hardly any effect here).
+
+Y axis: Here the p-values are displayed, but not classically, but -log10 of the p-value/adjusted p-value; if one would display adjusted p-value directly, this would not be optimal, since with the p-value/adjusted p-value the interesting range goes from 0 to 0, 05. So if you plot the p-value from 0 to 1, most of the whole graph is uninteresting. To get around this, the logarithm is used: If one applies this, the range between 0 to 1 is expanded and the closer one approaches 0, the more one goes towards minus infinity; I.e. if one applies the log the interesting range of 0-0.05 is made larger; Finally the minus is put in front of it, so that no large negative numbers result, but large positive numbers- means then that the small p-values are on top (- thus large interesting/small uninteresting in the figure). High values are then the probe sets which have the smallest p-values.
+
+The color red is used to express the expression upwards (- log FC upwards.) Blue means log FC downwards. Red and blue points are the probe sets that are interesting because they have certain minimum effect and they are below the 5 percent, i.e. they are significant.
+Since the effect in the code was set at + / - 1, the reds are more than 100% change up and significant and the blues are change down (so represent downregulation) and also mean at least 100% change; (So -1 in log2 scale: at least halving of expression and adjusted p-value less than 5%, so also significant). This is how the blue and red clouds are formed, i.e. the gene/probe sets that are of particular interest.
+
+For high dimensional data sets not only 1 criterion (p-values) should be used, but this should be combined with another criterion, which is a measure for the effect, to see how big the difference is: Classically p-value/adjusted p-value with log-FC, if you want reproducible results. The points in the red and blue areas have a much higher probability that someone else can reproduce them as well. If you require an effect of 100% (i.e. doubling or halving), then you can usually reproduce that well; e.g. through a PCR reaction, genes are selected in these areas, a primer design is made for them, and then confirmation experiments are done again with PCR - then there should be a good chance that the results can be reproduced. -> Requirement for omics experiments due to high pressure false positives requires confirmation experiments with other technology (could be sequencing, or PCR etc.)
+
+
+Generate heatmaps of results. 
+
+```{r}
+library(ComplexHeatmap)
+library(circlize)
+library(RColorBrewer)
+sel <- res$adj.p.value < 0.05 & abs(res$`difference in means`) > 1
+selData <- RMA.fi[sel,]
+selData <- selData - rowMeans(selData, na.rm = TRUE)
+colnames(selData) <- as.character(group)
+col1 <- rev(brewer.pal(n = 8, name = "RdYlBu"))
+col2 <- brewer.pal(n = 3, name = "Set1")[c(3,1)]
+mycol <- colorRamp2(seq(-2, 2, length = 128), colorRampPalette(col1)(128))
+df <- data.frame(Group = group)
+ha <- HeatmapAnnotation(df = df,
+                        col = list(Group = c("A1" = col2[1],
+                                             "A2" = col2[2])))
+Heatmap(selData, col = mycol, name = "log2-FC", show_row_names = FALSE,
+        top_annotation = ha, show_column_names = TRUE,
+        column_names_gp = gpar(fontsize = 8),
+        clustering_distance_columns = "pearson",
+        show_row_dend = TRUE, 
+        cluster_columns = TRUE, show_column_dend = TRUE,
+        column_title = "Adj. p Value < 0.05 and |log2-FC| > 1",
+        show_heatmap_legend = TRUE)
+```
+
+Idea so similar to the similarity maps used in quality control. We have here a large set of significant probe sets: There are now 2441 probe sets shown in the heat map.
+In the columns we see the samples (A1, A2) for the two monkey species we are studying, with green representing one monkey species and red the other.
+Clustering is performed, i.e. the samples are sorted according to a certain similarity, which is determined by best clustering techniques. Clustering methods. Here, a hierarchical clustering with Pearson correlation was performed on the samples (see tree above); the 2441 genes/probe sets that were selected all have adjusted p-values less than 5% and have log fold change greater than 1; due to the mass, one would like to have a perfect separation on both groups.
+
+In group A2, a majority of genes are seen to have higher expression than in group A1, and there is only a small group of genes that have higher expression in group A1 than in A2. The high expression is indicated in red color (as in the Volcano plot). Interpretations could refer, in terms of gene expression, to the fact that in one group there is much more triggering than inhibition, while in the other group there is more inhibition than triggering.
+
+The genes were also clustered; A total of 8 clusters were used for this. A total of 8 groups are formed, but essentially there are actually 2 groups: 1 times the group red left which is up-regulated here and blue down-regulated on the right and the group blue left /red right is inversely regulated; However, there are also fine gradations: In group 4 the difference seems to be the greatest: Here the intense coloring stands for "very high" on the left and "very low" on the right; you also have corresponding groups that are closer, like group 5 with a light red and light blue - so there are still certain subgroups in the genes.
+
+If there are more groups, one could, for example, use a venn diagram to compare the different gene lists.
+In general, there are many biological significant differences.
+
+
+# Enrichment Analysis
+
+So far, we have only purely statistical results. These do not yet say anything about biology; 
+Enrichment analysis now tries to combine statistical results with biological results. Evidence is added; if biological information is added, the validity of the results can be significantly improved.
+Enrichment analysis proceeds in several steps: 
+
+Step 1: First you have a gene universe as a basis (are all genes that we have measured, or at least all genes with which we have entered the statistical analysis; example: of the approximately 45000 genes we have used 13669, with which we then went into the statistical analysis = gene universe).
+
+Now one gets the information from biological databases; here in the following the GO database and the KEGG database are used, in which information about the genes are: In these biological databases the genes are divided into certain groups; So the gene universe is now divided into groups; Each group reflects a certain biological function = biologically relevant gene groups / does not have to be a 1:1 assignment, so it is a 1:n division - so 1 gene can occur in n groups.
+
+Step 2: The same has to be done with the list of interesting genes identified by the statistical analysis (based on statistical criteria).
+
+3rd step: Now representation like a random experiment. 
+Now take out a functionality, e.g. cancer genes (see calculation of the enrichment for KEGG, Pancreatic cancer, e.g.); now you have the group cancer genes against non-cancer genes and do random experiment: From the gene universe genes are taken out at random (arbitrarily, without putting back) and then you count: How many ended up in the group of cancer genes. Now the experiment looks at how many of the interesting genes are cancer genes. One can then compare these two numbers. If the two numbers are similar, one assumes a random result and could conclude that cancer does not contribute. This would be different if one were to get half as many cancer genes as were found in the statistical analysis; Then one would assume that cancer genes probably contribute, i.e. the functionality cancer (or whatever these genes reflect) is important here in this context/ The group of cancer genes would be enriched; enrichment can not only go in the direction of "more" but also in the direction of "less", e.g. one could randomly draw 50 genes but then have only 5 in the experiment - cancer genes may not contribute e.g. or are suppressed in the experiment.
+
+Enrichment analysis is based on a hypergeometric distribution, i.e., drawing without reclining, i.e., one can create a p-value for the group, which then tells how far the actual observed number of values that I got in my biological experiment deviates from the values that I would get by chance; thus, a p-value can be calculated for each gene group, so to speak, and one can then say that there are significantly enriched groups or groups that are not enriched. The groups that are enriched reflect the biology that contributes in the experiment. One doesn't look at single genes, but at a certain number of biological functionalities (not about 2400 genes, but 10/15-20 biological functionalities that are enriched) and can try to understand what happened biologically in the experiment.
+
+We apply two functions from the package limma. 
+
+Creating the gene lists.
+
+```{r}
+library(org.Hs.eg.db)
+library(hgu133plus2.db)
+GeneID <- select(hgu133plus2.db, keys = keys(hgu133plus2.db), 
+                 columns = "ENTREZID")
+keys.UP <- rownames(res)[(res$`difference in means` > 0 & 
+                            res$adj.p.value < 0.05)]
+keys.DN <- rownames(res)[(res$`difference in means` < 0 & 
+                            res$adj.p.value < 0.05)]
+GeneID.UP <- select(hgu133plus2.db, keys = keys.UP, columns = "ENTREZID")
+GeneID.DN <- select(hgu133plus2.db, keys = keys.DN, columns = "ENTREZID")
+```
+
+We have to use the database that includes info about the genes and another database  which includes info about the Affymetrix Human Genome U133 Plus 2.0 Array. Usually when doing enrichment analyses the ID one needs is ENTREZ-ID. Every probe set has a probe ID and here the probe IDs are mapped to the ENTREZ IDs (might not be 1:1 but 1:n e.g., see description above; the reason is, that the chip is rather old and now we are using a current database). So first we are generating the gene universe for the enrichment analysis (Gene-ID); than we are generating 2 more lists of genes (interesting genes): First list of genes are all genes that are upregulated and the 2nd list are all genes that are downregulated.
+
+Calculation of the enrichment for GO (Gene Ontology).
+
+```{r}
+go <- goana(list(Up = unique(GeneID.UP$ENTREZID), 
+                 Down = unique(GeneID.DN$ENTREZID)), 
+            universe = unique(GeneID$ENTREZID), 
+            species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+```
+
+First, the top Gene Ontology genes that are upregulated appear. The GO database is divided into different parts; The GO project provides three structured networks of defined terms to describe gene product attributes. These are biological process (BP), molecular function (MF), and cellular compartment (CC). Thus, different terms/functionalities appear depending on the ontology. 
+For example, in the first CC term listed "intracellular anatomical structure", there are a lot of genes that are affected, 14259. In the "up" set that is focused, 2223 genes go up. Looking at the p-value, we see that the results are definitely significant (is about 10 to the power of -200). Although this is the "up" list, there are also genes here in this division that go down (381): Thus, there is a combination of up-regulated and down-regulated genes, which typically reflects the interaction at gene functionalities within a biological network.
+
+Subsequently, the genes that are downregulated appear. Here again, there are certain functions that appear to be important. For example, the first MF term in the "Down" list is "Molecular function". In this group, there are very many genes that are affected (16945). Here, very many are found that are up-regulated (2347), whereas here the genes are specifically considered that are down-regulated, namely 448. Reason: As has already been shown in the heat map, there are many more genes that are up-regulated than genes that are down-regulated. Therefore, if you look at the p-values in the "down" list, you will see the smaller p-values for the genes that are upregulated.
+
+
+Calculation of the enrichment for KEGG
+
+```{r}
+kg <- kegga(list(Up = unique(GeneID.UP$ENTREZID), 
+                 Down = unique(GeneID.DN$ENTREZID)), 
+            universe = unique(GeneID$ENTREZID), 
+            species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+```
+
+KEGG again contains other biological functions, namely diseases. About these one gets again other statements. So here there are certain classifications/diseases where these gene groups have been described. There are a number of results if you look at the genes that are "up"-regulated (e.g. prostate cancer) and "down"-regulated (e.g. pancreatic cancer) with regard to the groups. The problem with KEGG is, that it has to be kept in mind, that there are diseases which have been researched intensively, like e.g. cancer or more previously COVID 19. So, there is a high chance that the database correlates features with these extensively researched fields with our experiment even though there might not be an association; There are examples related to COVID 19, but at the time the experiment was conducted this disease has not existed, yet. Therefore, one must be somewhat careful when using such databases in general.
+
+
+General problem of enrichment analyses:
+Although the information, which amounted to 2441 genes in our heatmap (see heatmap), is now grouped to give an overview, the groups are still very large, especially for the top terms. So, in order to further break down complexity there are bioconductor packages, which help to visualize/simplify the results, like e.g. simplifyEnrichment.
+
+
+```{r}
+library(simplifyEnrichment)
+library(GO.db)
+library(org.Hs.eg.db)
+egGO2ALLEGS <- getFromNamespace("org.Hs.egGO2ALLEGS", "org.Hs.eg.db")
+entrez_list <- unique(GeneID$ENTREZID)
+entrez_list <- entrez_list[order(as.numeric(entrez_list))]
+entrez_list <- entrez_list[!is.na(entrez_list)]
+
+AnnotationDbi::Lkeys(egGO2ALLEGS) <- entrez_list
+GeneID.PathID <- AnnotationDbi::toTable(egGO2ALLEGS)[, c("gene_id", "go_id", "Ontology")]
+d <- duplicated(GeneID.PathID[, c("gene_id", "go_id")])
+GeneID.PathID <- GeneID.PathID[!d, ]
+
+entrez.sig.up <- unique(GeneID.UP$ENTREZID)
+entrez.sig.up <- entrez.sig.up[order(as.numeric(entrez.sig.up))]
+entrez.sig.up <- entrez.sig.up[!is.na(entrez.sig.up)]
+GO.sig.up <- GeneID.PathID[GeneID.PathID$gene_id %in% entrez.sig.up,]
+
+entrez.sig.dn <- unique(GeneID.DN$ENTREZID)
+entrez.sig.dn <- entrez.sig.dn[order(as.numeric(entrez.sig.dn))]
+entrez.sig.dn <- entrez.sig.dn[!is.na(entrez.sig.dn)]
+GO.sig.dn <- GeneID.PathID[GeneID.PathID$gene_id %in% entrez.sig.dn,]
+
+## very long computations
+#sim.BP.up <- GO_similarity(GO.sig.up$go_id[GO.sig.up$Ontology == "BP"], ont = "BP")
+#sim.CC.up <- GO_similarity(GO.sig.up$go_id[GO.sig.up$Ontology == "CC"], ont = "CC")
+#sim.MF.up <- GO_similarity(GO.sig.up$go_id[GO.sig.up$Ontology == "MF"], ont = "MF")
+#sim.BP.dn <- GO_similarity(GO.sig.dn$go_id[GO.sig.dn$Ontology == "BP"], ont = "BP")
+#sim.CC.dn <- GO_similarity(GO.sig.dn$go_id[GO.sig.dn$Ontology == "CC"], ont = "CC")
+sim.MF.dn <- GO_similarity(GO.sig.dn$go_id[GO.sig.dn$Ontology == "MF"], ont = "MF")
+
+## very long computations
+#res.BP.up <- simplifyGO(sim.BP.up, column_title = "GO BP - up")
+#res.CC.up <- simplifyGO(sim.CC.up, column_title = "GO CC - up")
+#res.MF.up <- simplifyGO(sim.MF.up, column_title = "GO MF - up")
+#res.BP.dn <- simplifyGO(sim.BP.dn, column_title = "GO BP - down")
+#res.CC.dn <- simplifyGO(sim.CC.dn, column_title = "GO CC - down")
+res.MF.dn <- simplifyGO(sim.MF.dn, column_title = "GO MF - down")
+```
+
+Due to time constraints (because of the load), only the Molecular Function (MF) category is considered. As can be seen in the graph, simplifyEnrichment summarizes the results by displaying a similarity map. For each of the clusters on the right, there is a word cloud describing a functionality. It shows the words that occur most frequently in these biological functions. The clusters are formed based on some distances (you can use other distances with the package). Here we have quite large clusters. The larger the letters are, the more important the wording is; the coloring is random. 
+
+
+There are different ways of performing enrichment analyses, like e.g. clusterProfiler.
+
+```{r}
+library(clusterProfiler)
+ego <- enrichGO(gene          = GO.sig.dn$gene_id,
+                universe      = entrez_list,
+                OrgDb         = org.Hs.eg.db,
+                ont           = "MF",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.2,
+                qvalueCutoff  = 0.2,
+                readable      = TRUE)
+head(ego)
+goplot(ego)
+```
+
+clusterProfiler again uses the GO database. Here you can also see which genes are behind the biological pathways. One thing that is critical here is the p-value adjustment. That is the reason why there is no p-value adjustment in the Limma package. When looking at these groups, there is a high probability that the groups contain the same genes and overlap. Thus, there may not be weak dependence (which is allowed in multiple testing), but strong dependence in some cases. So one has to be careful with the interpretation of adjusted p-values. 
+
+The plot function shows a hierarchical tree which describes dependencies; on the right hand side there is the adj. p-value. If dots are colored the functionalities are significantly enriched (blue 0 until red 0.05); grey dots mean that the functionalities don`t seem to be relevant in our case. By using the plot one can try to identify relevant parts within the enriched terms of the experiment.
+
+
+Another package: DOSE = another wa of doing enrichment analyses.
+
+```{r}
+library(DOSE)
+edo <- enrichDGN(GO.sig.up$gene_id, 
+                 universe = entrez_list,
+                 pvalueCutoff = 0.2)
+library(enrichplot)
+barplot(edo)
+dotplot(edo)
+edox <- setReadable(edo, 'org.Hs.eg.db', 'ENTREZID')
+p1 <- cnetplot(edox, foldChange=GO.sig.up$gene_id)
+p1
+p2 <- cnetplot(edox, foldChange=GO.sig.up$gene_id, 
+               circular = TRUE, colorEdge = TRUE)
+p2
+p3 <- cnetplot(edox, node_label="category", cex_label_category = 1.2)
+p3
+p4 <- cnetplot(edox, node_label="gene", cex_label_gene = 0.8)
+p4
+p5 <- heatplot(edox)
+p5
+edox2 <- pairwise_termsim(edox)
+p6 <- treeplot(edox2)
+p6
+```
+
+There are different ways to present the information, either in the form of a bar chart (shows functionalities that are enriched; has an adj. p-value; 2 groups: Monkeys differ in terms of hair, eyebrows, etc.) or in the form of a dot plot. One can also use network diagrams that also show associations between different results and overlaps to find out which genes are included in more than one functionality (one can also see results: so these groups are obviously quite similar: childhood and adult myelodisplastic syndrome, for example). Another way to display the information is to use a circular shape, a network graph without labels, or a heat map where you can see the different gene names and the functionalities in which they occur. So there are a variety of ways to present the information of the experiment in an appealing way. 
+
+
+Conclusion:
+
+The experiment "Comparison of human and non-human primate gene expression profiles" was designed to demonstrate whether gene expression profiling of NPHs with human gene chips is possible using the GSE2634 dataset. In this work, eight of the total 17 samples, which refer to samples from a total of three monkey species and humans, were analyzed. The eight arrays refer to four samples each from the two monkey species African green monkey (Chlorocebus aethiops) and cynomologus macaque (Macaca fascicularis). When comparing these two monkey species in the present work, it was detected that one group shows a high correlation between the arrays and is thus homogeneous, while the second group appears quite heterogeneous.
+
+With respect to the original data of the experiment "Comparison of human and non-human primate gene expression profiles", it can also be detected that one group is extremely similar, namely the Cynomologus macaque. In contrast, the African green monkey species appears to be less similar within its own species. In this context, pairwise comparisons of distances between sample points with different coloration (corresponding to similarities/differences) were presented as intensity maps (see Figure 2 in Dillman JF, Phillips CS (2005): Comparison of Non-Human Primate and Human Whole Blood Tissue Gene Expression Profiles, TOXICOLOGICAL SCIENCES 87(1), p. 311). To identify molecular functions and biological processes and detect whether they are similar within species, groups of probe sets were mapped to the Gene Ontology (GO) database. Supplemental data from the experiment, which can be found online at www.toxsci.oxfordjournals.org, include Table 2, which summarizes the molecular functions represented by each group of probe sets; the data from the experiment are not divided into up- and down-regulation with respect to functions, as is the case in the present data analysis. However, the experiment was published in 2005 and therefore dates back many years. But the molecular function "binding," which in our case is quite general, is clearly divided into RNA, DNA, protein, and GTP (etc.) binding in both African vervet monkeys and Cynomologus macaques in the supplemental data of the original experiment. 
+Thus, it can be seen in both the original publication and the present analysis that genes occupy a central role in terms of "binding" with respect to the molecular functions of the GO database. This is also supported by the simplify enrichment results in the down-regulated MF cluster, where "binding" is very abundant. What this means in detail or what biological conditions are behind it would need to be investigated in more detail. 
+The results can be presented in an appealing way using a variety of methods, as shown in the paper.
+
+
+# Software
+
+```{r}
+sessionInfo()
+```
