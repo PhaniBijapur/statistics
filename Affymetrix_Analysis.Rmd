@@ -1,6 +1,6 @@
 ---
 title: "Affymetrix Microarray Workflow"
-author: "RAMZAN ALI
+author: "Phaniraj Bijapur"
 date: "May 2024"
 output:
   rmarkdown::html_document:
