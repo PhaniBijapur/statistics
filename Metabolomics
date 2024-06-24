@@ -1,1 +1,292 @@
 File contains code, explanation of code and interpretation with example.
+
+
+---
+title: "Targeted Metabolomics Workflow"
+author: "Phaniraj Bijapur"
+date: "June 2024"
+output:
+  rmarkdown::html_document:
+    toc: true
+    toc_float : true
+    number_sections: true
+    theme: "bootstrap"
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = TRUE)
+```
+
+# Introduction
+
+Targeted metabolomics workflow analysis is a method designed to identify and quantify a specific set of metabolites within a biological sample. This approach emphasizes analyzing predefined groups of metabolites associated with particular pathways or biological processes, ensuring high sensitivity and specificity. In examining the imported dataset (rawData), it is evident that the samples are derived from mice and categorized into two groups: control and treatment. The analysis was conducted on serum samples and includes metabolite names such as C16:1-OH, C16:2-OH, C18, etc., which likely represent specific lipid or metabolite species. Although there isn't a specific article or paper provided, these insights can be inferred from the data.
+
+
+# Import of Data
+
+```{r}
+load("rawData.RData")
+```
+The metabolite data, named rawData, is obtained from Professor Kohl's GitHub repository. This dataset is loaded into the environment or workspace using the "load" function in R. Unlike typical datasets in CSV format, this file has an .RData extension. This format is chosen possibly due to its ability to handle large volumes of data more efficiently through compression and its capability to retain complex R structures such as vectors and data frames. Additionally, .RData format is advantageous for datasets containing extensive lists of metabolites, making them easier to manage within the R environment.
+
+```{r}
+rawData <- rawData[order(rawData$Gruppe, rawData$'Sample Identification'),]
+str(rawData)
+```
+The code uses the order function on rawData. Primarily, the data is ordered by the column "Gruppe", and then it is sorted by the column "Sample Identification". The comma in the order function ensures that all columns are retained after sorting. The second line of the code, str(rawData), is used to view the structure of the data.
+
+The data consists of 19 observations (rows) and 383 variables (columns), including columns with a targeted list of metabolites. The str function provides a detailed description of the data types within the dataset, such as characters, strings, and integers. The dataset contains values like group, sample, species, and other relevant details.
+
+
+```{r}
+rawData[,1:5]
+```
+The command rawData[,1:5] extracts columns 1 through 5 from the data frame rawData, including all rows. This is used to check if the data is sorted correctly. Viewing this subset shows the columns "Sample Identification", "Species", "Material", "Gruppe", and "Well Position".
+
+In the "Gruppe" column, the data is ordered, with the initial rows labeled "Kontrolle" and the subsequent rows labeled "Treatment". This indicates that the data is first sorted by "Gruppe" and then by "Sample Identification". Within the "Kontrolle" and "Treatment" groups, the "Sample Identification" column is also sorted, confirming the data was ordered as intended.
+
+
+```{r}
+concData <- rawData[,seq(from = 8, to = 382, by = 2)]
+statusData <- rawData[,seq(from = 9, to = 383, by = 2)]
+colnames(statusData) <- colnames(concData)
+```
+The code generates two subsets from rawData. The initial 7 columns, which contain general data such as sample identification, group, sample, and other metadata, are not used. Instead, the focus is on the metabolite data: the status of metabolites and their concentration/values.
+
+The first line creates a sequence from 8 to 382 using the seq function and assigns these columns to concData. This object includes every second column starting from the 8th column, representing the concentration/values of metabolites.
+The second line creates a sequence from 9 to 383 and assigns these columns to statusData. This object includes every second column starting from the 9th column, representing the status of metabolites.
+
+By subsetting rawData with these sequences, concData and statusData are created to hold all rows but only the specified columns.
+
+Finally, the column names of statusData are set to match those of concData. This ensures that both subsets have identical column names, which is necessary because we need to analyze the metabolite values and statuses separately.
+
+# Quality Control
+
+```{r, fig.width=10}
+library(Amelia)
+missmap(concData, rank.order = FALSE, y.labels = rawData[,1], 
+        x.cex = 0.2)
+```
+The code generates a missingness plot, providing a visual representation of missing values in the dataset. The `missmap` function from the `Amelia` package is used to create this plot for the `concData` object, which contains only the concentration values.The `rank.order` parameter is set to `FALSE`, ensuring the data is not ordered based on the presence of NA values. The y-axis labels are derived from the first column of `rawData`, which contains sample identifications, while the x-axis represents the list of metabolites.
+
+The resulting image includes a legend indicating that 1% of the data is missing (NA) and 99% is present. In the plot, missing values are shown in white, and observed values are shown in blue. Samples are run in duplicates, and it is observed that most samples are missing the metabolite Leucine & Lysine. Additionally, single samples from 22 and 21 are missing two more metabolites along with Leucine & Lysine.
+
+
+```{r}
+NAcols <- colSums(is.na(concData)) > 0
+missmap(concData[,NAcols], rank.order = FALSE, y.labels = rawData[,1])
+```
+The above code creates a logical vector indicating which columns in concData contain at least one NA value. In the second line, the missmap function is applied, using this logical vector to index concData. This extracts and plots all rows but only the columns with missing values.
+
+From the plot:
+
+Sample 22: One duplicate is missing the metabolites Arg, Leu, Lys, and Ser, while the other duplicate has missing metabolites are Leu, Lys.
+Samples 6, 5, 3, 21, 15, 14: These samples consistently miss Leu across their duplicates.
+Samples 6, 5(one of the duplicate), 3, 1, 21, 15, 14: These samples miss Lys.
+Sample 1: This sample does not have duplicates.
+This detailed examination of the missingness plot highlights the specific patterns of missing metabolites across the samples, helping to understand the distribution and consistency of missing data within the dataset.
+
+
+The `concdata` set doesnt contain <LOD , <LLOD columns. Which also contains the missing values.  The details about <LOD & <LLOD are in statusdata object. so missmap function also applied on them to generate total vies on the data.
+```{r}
+LOD <- statusData == "< LOD"
+Detected <- LOD
+LOD[LOD] <- NA
+NAcols <- colSums(is.na(LOD)) > 0
+missmap(as.data.frame(LOD[,NAcols]), rank.order = FALSE,
+        y.labels = rawData[,1], main = "< LOD", legend = FALSE)
+LLOQ <- statusData == "< LLOQ"
+Detected <- Detected | LLOQ
+Detected <- !Detected
+LLOQ[LLOQ] <- NA
+NAcols <- colSums(is.na(LLOQ)) > 0
+missmap(as.data.frame(LLOQ[,NAcols]), rank.order = FALSE,
+        y.labels = rawData[,1], main = "< LLOQ", legend = FALSE)
+```
+The provided code handles both Limit of Detection (LOD) and Lower Limit of Detection (LLOD) by creating logical vectors indicating true or false values. If the value is true, it is replaced with NA, and detected values are assigned by indexing the columns with NA, representing values below LOD or LLOD and then missing maps are plotted.
+
+<LOD: Metabolites C9 and dopamine metabolites are below LOD in all samples. A total of 17 metabolites have values less than LOD.
+<LLOD: Metabolites C14, C18, C3, and C5 have values below LLOD in all samples. In total, 19 metabolites have values less than LLOD.
+
+Summary and Implications:
+
+If an experiment is planned based on these metabolites, it may be challenging to define the endpoint or describe disease progression. With 375 targeted metabolites, other metabolites could be considered to describe the disease. However, a positive aspect is that an increase in these metabolites' levels in subsequent disease progression—such as an increase in dopamine levels in detectable range after some days of treatment could be a significant indicator of treatment efficacy or disease progression.
+
+```{r}
+library(MKomics)
+Cor <- cor(t(concData), method = "spearman",
+           use = "pairwise.complete.obs")
+corPlot(Cor, minCor = 0.95, labels = paste(rawData$Gruppe, rawData[,1]),
+        title = "Spearman correlation")
+```
+The code is designed to create a correlation map for the dataset. It transposes the dataset (concData) to compute correlations row-wise. The Spearman correlation method, a rank-based correlation, is used. The correlation map is plotted only for correlation values between 0.95 and 1. Labels are derived from the rawData group values and the first column of rawData. The code ensures that all available data is used by using `pairwise.complete.obs`.
+
+The control group exhibits higher correlation. There is less intra-group correlation within the treatment group. The sample 3 shows the most variation within the treatment group and to the control group, which may be due to sample-specific variation. Overall, there is a noticeable difference between the treatment and control groups.
+
+# Preprocessing
+
+```{r}
+logData <- log2(concData)
+logData[logData == -Inf] <- NA
+```
+The concData is logarithmically transformed to normalize & stabilize the variance. During this process, negative infinity values are replaced with NA to prevent issues in further analysis.
+
+
+```{r}
+logFC.dupl <- logData[-11,][seq(1,17,by=2),]-logData[-11,][seq(2,18,by=2),]
+boxplot(logFC.dupl, las = 2, main = "log-FC between technical duplicates",
+        ylab = "log-FC", cex.axis = 0.6)
+abline(h = log2(1.2)*c(-1,1), col = "darkred")
+abline(h = log2(1.1)*c(-1,1), col = "darkgreen")
+legend("topleft", fill = c("darkgreen", "darkred"),
+       legend = c("+/- 10%", "+/- 20%"))
+```
+We exclude sample 1 because it does not have duplicates. By finding the differences between the duplicates for all other samples, we store the results in `logFC.dupl`. We then create a boxplot with vertical x-axis labels. Additionally, we add lines at 10% and 20% on both sides of the boxplot. Since these are log values, small changes are enough to describe the variance, so we mark the 10% and 20% lines.
+
+In the resulting graph, some metabolites fall within the ±20% range. We can clearly see high variance in some metabolites, with some having outliers up to 4-fold. Additionally, the graph shows metabolites with different IQR lengths and various outliers
+
+```{r}
+Qs <- apply(logFC.dupl, 2, quantile, probs = c(0.25, 0.75), na.rm = TRUE)
+ausw.var <- Qs[1,] < -log2(1.2) | Qs[2,] > log2(1.2)
+boxplot(logFC.dupl[,which(ausw.var)], las = 2, cex.axis = 0.6,
+        main = "log-FC between technical duplicates", ylab = "log-FC")
+abline(h = log2(1.2)*c(-1,1), col = "darkred")
+abline(h = log2(1.1)*c(-1,1), col = "darkgreen")
+legend("topleft", fill = c("darkgreen", "darkred"),
+       legend = c("+/- 10%", "+/- 20%"))
+```
+As the previous graph was cluttered, we decided to select only the columns of interest. We calculated the 1st quantile (0.25) and the 3rd quantile (0.75) and identified metabolites with high variance. Specifically, we looked for metabolites with variance exceeding 20% in either direction. Using a logical vector, we stored the columns of these metabolites.
+
+Among the metabolites, PC aa C30:2 exhibits the highest variance, followed by PC aa C30:1 and SM C26:0, which also show significant variability.
+
+```{r}
+normData <- 0.5*logData[-11,][seq(1,17,by=2),]+0.5*logData[-11,][seq(2,18,by=2),]
+normData <- rbind(normData[1:5,], logData[11,], normData[6:9,])
+normData[apply(normData, 2, is.infinite)] <- NA
+ausw.det <- Detected[-11,][seq(1,17,by=2),] | Detected[-11,][seq(2,18,by=2),]
+ausw.det <- rbind(ausw.det[1:5,], Detected[11,], ausw.det[6:9,])
+```
+Averaging the samples, normData stores the averages between duplicates. Then, the 11th row is reinserted using the rbind function. If any values are infinite, they are replaced with NA.
+
+```{r}
+group <- factor(c(rep("Control", 5), rep("Treatment", 5)))
+ID <- c(13, 14, 15, 21, 22, 1, 2, 3, 5, 6)
+boxplot(t(normData), las = 2, names = group,
+        ylab = "log-concentrations", main = "All samples",
+        col = "darkgreen")
+```
+The code first creates a grouping factor for the boxplot, labeling the first five samples as "Control" and the next five as "Treatment." Sample IDs are then assigned to these groups. A boxplot is generated for the log-transformed and averaged data.
+
+The logarithmic transformation was applied to stabilize the data. After the log transformation and averaging the duplicates, the data appears stabilized. All samples have their medians at 0 and exhibit similar interquartile ranges (IQR). There is a difference in whisker length, with outliners present in Control samples (13, 14, 21, 22) and a Treatment sample (6). Overall, the data seems reasonably well-balanced.
+
+```{r}
+library(vsn)
+meanSdPlot(t(normData))
+```
+
+A typical mean-sd graph should feature a straight red line, indicating that the standard deviation (SD) or variance is constant across all samples, which is the ideal condition after stabilization. In this case, after normalization, the SD varies but remains within a range of 0.4 to 0.6 most of the time, which is reasonably good. This means there is no evident trend between SD and mean. The highest variance is observed around a mean of 60. 
+
+```{r}
+Cor <- cor(t(normData), use = "pairwise.complete.obs")
+corPlot(Cor, minCor = 0.95, cex.axis = 0.75, title = "Pearson correlation",
+        labels = paste(ID, group, sep = ": "))
+```
+The correlation plot is applied again on `normData`, which consists of data after normalization and averaging the duplicates. This plot provides a clearer picture than the previous correlation map, making differences more easily observable. The control group remains more conserved and correlated, while clear differences between the control and treatment groups are evident. Samples 3, 5, and 6 in the treatment group show more variation both within the treatment group and compared to the control group. Samples 1 and 2 are more closely related to the control group than to other members of the treatment group.
+
+# Statistical Analysis
+The mod.t.test function is sourced from the Bioconductor package `limma`.
+
+```{r}
+res <- mod.t.test(t(normData), group = group)
+```
+After transposing the data and comparing the mean differences between the control and treatment groups, the `res` dataset contains statistical values such as t-values, p-values, and adjusted p-values. These values are crucial for identifying significant tests where the p-value is less than 0.05. This threshold helps determine which variables (e.g., metabolites) show statistically significant differences between the two groups, indicating potential biological significance in your analysis.
+
+```{r}
+hist(res$p.value, freq = TRUE, breaks = 100,
+     main = "Diagnostic Plot: Distribution of p values",
+     xlim = c(0, 1), xlab = "p-values")
+```
+The code generates a histogram plot using the p-values extracted from `res`. In experiments adhering to the null hypothesis, p-values should ideally exhibit a uniform distribution across the range of 0 to 1. However, the histogram displays skewness, indicating deviations from the null hypothesis. The presence of a prominent peak or tall bar around 0 suggests a concentration of p-values below the typical significance threshold of 0.05, signifying statistically significant tests. This skewness reflects that a considerable number of tests resulted in p-values indicating significant findings, rather than a uniform distribution expected under the null hypothesis.
+
+
+```{r}
+library(MKinfer)
+volcano(res$`difference in means`, pval = res$adj.p.value, 
+        effect0 = 0, effect.low = -1, effect.high = 1, 
+        alpha = 0.25, xlab = "log2-fold Change (log2-FC)",
+        ylab = expression(paste(-log[10], "(adj. p Value)")))
+
+```
+The x-axis of the volcano figure shows the magnitude of the effect, or Log FC (log2-fold change). Metabolite values further from zero on this axis imply more biological differences between groups and are therefore more interesting to examine.
+
+Plotting on the y-axis displays -log10 transformed P values (adjusted P values). When attempting to distinguish between significant and non-significant data, this translation increases the visibility of statistically significant results (P < 0.05).
+
+Metabolite colouring is done as follows: red dots show upregulated metabolites (positive Log FC) that show increased expression, and blue dots show downregulated metabolites (negative Log FC) that show decreased expression. Black dot shows not significantly change values. 
+
+Black horizontal line represents the thersold value of adj.p.
+
+Highlight: More metabolites are upregulated, compared to down regalated.
+
+**The Code doesn't have farbe so modified** 
+The variable farbe is derived as a logical vector based on conditions checking significant p-values (res$adj.p.value < 0.05) and large differences in means (abs(res$difference in means) > 1). It categorizes metabolites into TRUE for those meeting both criteria and FALSE otherwise.tion). By cosidering farbe as logical vector for significant p values & res$`difference in means`) > 1.
+
+```{r}
+farbe <- factor(as.integer(res$adj.p.value < 0.05 & abs(res$`difference in means`) > 1))
+top <- res[which(farbe == "1"),-c(5,7)]
+names(top)[1] <- "LogFoldChange"
+round(top[order(abs(top[,1]), decreasing = TRUE),], 3)
+```
+The code filters out metabolites that show significant test results with considerable fold change. It removes columns 5 and 7, which originally contained 'p.value' and 'B'. The resulting list comprises 23 metabolites.
+
+
+Generating Heat Map to validate significant metabolites.
+```{r, fig.height=10, fig.width=8}
+library(ComplexHeatmap)
+library(circlize)
+library(RColorBrewer)
+## select features
+sel <- rownames(top)
+selData <- t(normData[,colnames(normData) %in% sel])
+## mean centering
+selData <- selData - rowMeans(selData, na.rm = TRUE)
+selData[is.na(selData)] <- 0
+colnames(selData) <- paste(ID, group)
+## setting colors
+col1 <- rev(brewer.pal(n = 8, name = "RdYlBu"))
+col2 <- brewer.pal(n = 3, name = "Set1")[c(3,1)]
+mycol <- colorRamp2(seq(-2, 2, length = 128),
+                    colorRampPalette(col1)(128))
+df <- data.frame(group = group)
+ha <- HeatmapAnnotation(df = df,
+                        col = list(group = c("Control" = col2[1],
+                                             "Treatment" = col2[2])))
+set.seed(12345)
+Heatmap(selData, col = mycol, name = "log2-FC", show_row_names = TRUE,
+        row_names_gp = gpar(fontsize = 7),
+        row_names_max_width = unit(2, "cm"),
+        top_annotation = ha, show_column_names = TRUE,
+        clustering_distance_columns = "pearson",
+        show_row_dend = FALSE, km = 4,
+        cluster_columns = TRUE, show_column_dend = FALSE,
+        column_title = "Metabolites with adj. p < 0.05",
+        show_heatmap_legend = TRUE)
+```
+The heatmap generated using the 'Top' dataset reveals 23 metabolites categorized into 4 distinct groups, each showing clear differences between control (green) and treatment (red) groups.
+
+In the treatment group, cluster 1 and 4 exhibit relatively low variation compared to cluster 2 and 3. However, overall, there is a noticeable difference between control and treatment groups. The legend clarifies that red represents the treatment group and green represents the control group. Within the control group, there is some intra-group variation.But the treatment group shows the heightest intra group differences. Metabolite cluster 1, 2, and 3 are downregulated in control group, whereas cluster 4 shows upregulation. With treatment group metabolites of cluster 1,2,3 shows up regulation and cluster 4 shows down regulation.
+
+These stark differences in metabolite expression profiles can inform experimental design or provide insights into disease progression. Such information is invaluable for making informed decisions in various conditions.
+
+# Enrichment Analysis
+
+The website MetaboAnalyst offers an enrichment analysis feature where you can input a two-column matrix containing metabolite names and their corresponding values for each sample. This analysis provides insights into the enrichment of specific metabolites in your dataset, which is crucial for understanding methods, treatments, or disease progression based on metabolite profiles.
+
+**Overview**: Targeted metabolite analysis is instrumental in elucidating methodologies, treatments, or disease trajectories through metabolite value assessments.
+
+# Software
+
+```{r}
+sessionInfo()
+```
+
