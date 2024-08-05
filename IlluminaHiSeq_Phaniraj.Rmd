@@ -1,0 +1,500 @@
+---
+title: "Analysis of Illumina HiSeq 2000 Data"
+author: "Phaniraj Bijapur"
+date: "July 2024"
+output:
+  rmarkdown::html_document:
+    toc_float : true
+    theme: united
+    highlight: tango
+    toc: true
+---
+**Introduction:**
+
+**Comparing the Transcriptomes of Granulocytic and Macrophage Differentiated Forms of HL-60/S4 Cells**
+
+The HL-60 cell line, derived from a patient with acute myeloblastic leukemia, can undergo in vitro differentiation from a rapidly proliferating promyelocytic form to non-proliferating cells resembling neutrophils with segmented (lobulated) nuclei upon treatment with retinoic acid (RA). Alternatively, treating these undifferentiated cells with phorbol ester (TPA) results in rapid cessation of cell division and induces characteristics typical of macrophages, such as cell attachment to culture dishes.
+
+The HL-60/S4 subline, noted for its rapid differentiation capability, has been extensively utilized to study the morphological and molecular changes associated with differentiation. These include alterations in nuclear shape, chromatin structure, and cytoskeletal organization during differentiation induced by RA and TPA.
+
+This study aims to elucidate the phenotypic properties of the granulocyte and macrophage forms of HL-60/S4 cells by examining the transcriptional differences through RNA-Seq analysis. We compare the transcriptomes of RA-treated, TPA-treated, and untreated HL-60/S4 cells, four days post-exposure, to identify key gene expression changes associated with differentiation.
+
+The data for this project is accessible via the NCBI BioProject with accession number PRJNA303179. The project encompasses three groups of cells: untreated, TPA-treated, and RA-treated, each with four biological replicates, totaling 12 samples (SRR2959749, SRR2959843, SRR2959892, SRR2959894, SRR2959989, SRR2959990, SRR2959991, SRR2959992, SRR2959898, SRR2959952, SRR2959986, SRR2959987).
+
+This research, submitted on November 23, 2015, by the Marine Biological Laboratory, provides valuable insights into the transcriptional dynamics of HL-60/S4 cell differentiation, advancing our understanding of leukemia cell biology and differentiation processes.
+
+Link to experiment: NCBI BioProject PRJNA303179- (https://www.ncbi.nlm.nih.gov/bioproject/303179)
+
+# Loading of required packages
+
+```{r}
+library(tximport)
+library(EnsDb.Hsapiens.v86)
+library(MKomics)
+library(vsn)
+library(limma)
+library(edgeR)
+library(MKinfer)
+library(VennDiagram)
+library(GO.db)
+library(org.Hs.eg.db)
+library(DESeq2)
+```
+**Work Flow**
+
+#1. Download of data SRR*.1 files
+-> duration: several days (12 files, 117.9 GB)
+
+#2. Installation of NCBI sra toolkit
+https://trace.ncbi.nlm.nih.gov/Traces/sra/sra.cgi?view=software
+-> duration: minutes
+
+#3. Convert SRR*.1 files into fastq.gzip (fastq.gz) files
+fastq-dump -I --split-files --gzip SRR*.1
+(--split-files: paired-end data, two reads per spot)
+-> duration: about 15 hours (24 files, 157.3 GB)
+
+#4. Installation of salmon
+https://combine-lab.github.io/alevin-tutorial/2019/selective-alignment/
+-> duration: minutes
+
+#5. Download of
+ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_34/gencode.v34.transcripts.fa.gz
+ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_34/GRCh38.primary_assembly.genome.fa.gz
+-> duration: minutes (917.8 MB)
+
+#6. Generate salmon index
+grep "^>" <(zcat GRCh38.primary_assembly.genome.fa.gz) | cut -d " " -f 1 > decoys.txt
+
+sed -i -e 's/>//g' decoys.txt
+
+cat gencode.v34.transcripts.fa.gz GRCh38.primary_assembly.genome.fa.gz > gentrome.fa.gz
+
+salmon index -t gentrome.fa.gz -d decoys.txt -p 46 -i salmon_index
+-> duration: minutes
+
+7. Quantify with salmon
+#!/bin/bash
+for fn in data/*_1.fastq.gz
+do
+samp=`basename ${fn}`
+echo "Processing sample ${fn}"
+y=${fn%%_1*}
+echo "Second file ${y}_2.fastq.gz"
+salmon quant -i salmon_index -l A \
+         -1 ${fn} \
+         -2 ${y}_2.fastq.gz \
+         -p 46 --validateMappings -o ${fn}_quant
+done 
+-> duration: about 1h with 46 cores (12 files, 409 MB) 
+
+#8. Import Salman Quantification Data into R
+Bioconductor package tximport
+
+
+In order to examine RNA-Seq data from HL-60/S4 cells undergoing differentiation triggered by retinoic acid (RA) and phorbol ester (TPA) treatments, this approach combines precise quantification techniques with efficient data management.
+
+FSRA (Sequence Read Archive) is a repository maintained by NCBI that stores raw sequencing data from various high-throughput sequencing platforms. Using {`fastq-dump`}, each raw file is processed and split into two files, one for the forward read and one for the reverse read.
+
+Salmon is used after installation because it was chosen for its transcript quantification robustness. This involves downloading references to the human genome that include transcript sequences and the initial assembly, which is combined into `gentrome.fa.gz` in Step 6. The resulting Salmon index improves quantification precision and alignment accuracy.
+
+Salmon quantifies every paired-end FASTQ file set by running a script, guaranteeing quick and precise quantification for every sample. 
+The resulting data from salmon quantification is stored in txi.RData, is used for the following analysis.
+Because as we can see in the project each sample has 7-10 Gb data, so we are using processed data here.
+
+# Import of Salmon Quantification data
+
+```{r}
+Samples <- read.csv("Samples.csv")
+Samples$Group <- factor(Samples$Group, levels = c("untreated", "TPA", "RA"))
+Samples
+load(file = "txi.RData")
+tx2gene <- transcripts(EnsDb.Hsapiens.v86, 
+                       columns = c("tx_name", "gene_id", "gene_name"),
+                       return.type = "data.frame")
+head(txi$counts)
+cts <- txi$counts
+range(colSums(cts)/1e6)
+```
+Reading the `Samples.csv` file provides information such as run ID, experiment, and group (untreated, TPA, RA). We then loaded the processed data from `txi.RData`, which includes extracting gene annotation information, examining raw gene expression counts, and assessing the overall range of gene expression levels across samples. To make the data more interpretable, the counts are divided by one million. This gives us the sample IDs, ENSEMBL IDs, and quantification data (counts). These counts are then used to compute the library sizes. We also loaded `EnsDb.Hsapiens.v86`, which contains Ensembl-based gene annotations for the human genome (version 86).
+
+
+# Quality control of raw data
+
+```{r}
+cts0 <- cts
+cts0[cts0 == 0] <- min(cts0[cts0 != 0])
+boxplot(cts0, log = "y", range = 0, las = 2)
+```
+In this code, we made a copy of cts and stored it in cts0. This step allows us to modify the data without altering the original dataset. In cts0, we replaced all zero values with the smallest non-zero value because logarithmic transformation cannot handle zero values. We then created a boxplot using log-transformed values.
+
+The boxplot shows that all data points on the y-axis are from 0.01 and lower. The median is at the lower end of the boxplot, indicating that the majority of the data points are low. The interquartile range (IQR) spans from 0.01 to 100. All samples have the same whisker length, which extends to 1,000,000.
+
+```{r}
+Cor <- cor(cts, method = "spearman")
+par(mar=c(5,6,4,2)+0.1)
+corPlot(Cor, minCor = 0.86, labels = Samples$Run, 
+        title = "Spearman correlation")
+```
+Spearman correlation indicates the strength of the relationship between samples. Here, the correlation ranges from 0.86 to 1, and the heatmap appears mirrored due to symmetrical relationships. The plot suggests clear differences between the groups (untreated, TPA treated, RA treated). RA treated samples show higher correlation with untreated samples. Further data processing is required for precise conclusions.
+
+```{r}
+meanSdPlot(log(cts0))
+```
+The mean-SD plot is typically used to examine the standard deviation or constant variance of data. However, as observed in most HighSeq experiments, the variance here is not constant. Instead of using packages that assume a normal distribution, we use those based on a negative binomial distribution, which includes parameters for estimating dispersion and accounting for varying scaling. Unlike the Poisson distribution, the negative binomial distribution accommodates different variances. Therefore, the mean-SD plot is irrelevant in this case, as we rely on dispersion parameters to manage data variability.
+
+
+# Analysis with edgeR
+Using edgeR for analysis.
+
+## Unspecific filtering
+
+```{r}
+normMat <- txi$length
+normMat <- normMat / exp(rowMeans(log(normMat)))
+o <- log(calcNormFactors(cts/normMat)) + log(colSums(cts/normMat))
+y <- DGEList(cts)
+y <- scaleOffset(y, t(t(log(normMat)) + o))
+design <- model.matrix(~Samples$Group)
+keep <- filterByExpr(y, design)
+y <- y[keep,]
+```
+using edge package for RNA-seq data preprocessing, prioritizing filtering to improve analysis reliability. It normalizes transcript lengths (normMat) to adjust for sequencing variations and subsequently filters out genes with low counts using filterByExpr. This reduces the dataset from 57,240 to 18,994 sequences, concentrating on genes with elevated expression levels considered biologically pertinent.
+
+## Quality control of filtered data
+
+```{r}
+cts0 <- y$counts
+cts0[cts0 == 0] <- min(cts0[cts0 != 0])
+boxplot(cts0, log = "y", range = 0, las = 2)
+```
+Before preprocessing, the median of the data was towards the lower end of the interquartile range (IQR). After preprocessing, the boxplots show significant improvement: the median is now centered more effectively. Only a slight change is observed in the boxplots of the remaining 18,994 sequences. Importantly, all boxplots now have consistent whisker lengths. The median values are around 1,000. Previously, the lower end of the IQR was at 0.01, whereas now the lower whisker starts at 0.1, demonstrating the effectiveness of the filtering process. Sample ...894 has a little different median.
+
+```{r}
+Cor <- cor(y$counts, method = "spearman")
+par(mar=c(5,6,4,2)+0.1)
+corPlot(Cor, minCor = 0.84, labels = Samples$Run, 
+        title = "Spearman correlation")
+```
+After filtering, the differences are more clear.The untreated group exhibits stronger correlations, notably achieving a correlation coefficient of approximately 0.91 with RA-treated samples. The RA-treated group shows a correlation coefficient of 0.91 with untreated samples and 0.84 with TPA-treated samples. Sample `...894` displays higher variability and lower correlation both within untreated samples and across other groups. All three groups show high intra-group correlation coefficients ranging from 0.96 to 1. This indicates strong consistency within each group, suggesting that the samples within the untreated, RA-treated, and TPA-treated groups exhibit highly similar expression patterns.
+
+```{r}
+meanSdPlot(log(cts0))
+```
+The mean versus standard deviation plot has shown improvement but remains variable. In our filtered data, standard deviations range between approximately 2.8 and 0.5.At lower mean the SD is high. This variability indicates that the plot does not accurately reflect our data due to deviations from the assumption of constant variance typically assumed in normal distribution plots. Here we are assuming negative binomial distribution.
+
+## Negative Binomial Modell
+
+```{r}
+y <- estimateDisp(y, design)
+fit <- glmFit(y, design)
+## TPA vs untreated
+lrt.TPA.vs.untr <- glmLRT(fit, coef = 2)
+topTags(lrt.TPA.vs.untr)
+edgeR.lrt.TPA.vs.untr <- topTags(lrt.TPA.vs.untr, n=nrow(y), 
+                                 sort="none")[[1]]
+sum(edgeR.lrt.TPA.vs.untr$FDR < 0.05)
+sum(edgeR.lrt.TPA.vs.untr$FDR < 0.05 & 
+      abs(edgeR.lrt.TPA.vs.untr$logFC) > 1)
+## RA vs untreated
+lrt.RA.vs.untr <- glmLRT(fit, coef = 3)
+topTags(lrt.RA.vs.untr)
+edgeR.lrt.RA.vs.untr <- topTags(lrt.RA.vs.untr, n=nrow(y), 
+                                sort="none")[[1]]
+sum(edgeR.lrt.RA.vs.untr$FDR < 0.05)
+sum(edgeR.lrt.RA.vs.untr$FDR < 0.05 &
+      abs(edgeR.lrt.RA.vs.untr$logFC) > 1)
+## TPA vs RA
+lrt.TPA.vs.RA <- glmLRT(fit, contrast = c(0, -1, 1))
+topTags(lrt.TPA.vs.RA)
+edgeR.lrt.TPA.vs.RA <- topTags(lrt.TPA.vs.RA, n=nrow(y), 
+                               sort="none")[[1]]
+sum(edgeR.lrt.TPA.vs.RA$FDR < 0.05)
+sum(edgeR.lrt.TPA.vs.RA$FDR < 0.05 &
+      abs(edgeR.lrt.TPA.vs.RA$logFC) > 1)
+```
+First, the data's dispersion is estimated, followed by fitting a generalized linear model (GLM) using a negative binomial distribution, which accommodates the data's non-normal distribution characteristics. This approach reveals the relationship and significance between groups, emphasizing differences. Setting a false discovery rate (FDR) threshold of <0.05 and requiring at least a twofold change between groups, only statistically significant results are highlighted in volcano plots for further analysis.
+
+In comparisons between TPA-treated versus untreated groups, the GLM likelihood ratio test identifies highly significant differences with very low adjusted p-values, indicating substantial disparities. Out of 18,994 tested variables, 10,692 show significance, representing over half of the variables. Using a conservative log fold change criterion of one, equivalent to a doubling of expression, 7,115 variables remain significant.
+
+Similarly, RA-treated versus untreated comparisons show significant findings, with 8,651 variables showing significance and 5,036 remaining significant with a log fold change of one, despite lower initial expectations from correlation plots.
+
+Comparisons between TPA-treated versus RA-treated groups yield comparable results to RA versus untreated comparisons, with 7,702 significant variables and 4,749 remaining significant with a log fold change of one.
+
+These results underscore substantial differences in gene expression profiles between treatment groups, validated by robust statistical tests and fold change assessments.
+
+
+```{r}
+## TPA vs untreated
+edgeR.lrt.TPA.vs.untr$FDR[edgeR.lrt.TPA.vs.untr$FDR < 1e-16] <- 1e-16
+volcano(edgeR.lrt.TPA.vs.untr$logFC, 
+        edgeR.lrt.TPA.vs.untr$FDR, effect.low = -1, effect.high = 1,
+        title = "Volcano Plot: TPA vs untreated",
+        alpha = 0.3)
+## RA vs untreated
+edgeR.lrt.RA.vs.untr$FDR[edgeR.lrt.RA.vs.untr$FDR < 1e-16] <- 1e-16
+volcano(edgeR.lrt.RA.vs.untr$logFC, 
+        edgeR.lrt.RA.vs.untr$FDR, effect.low = -1, effect.high = 1,
+        title = "Volcano Plot: RA vs untreated",
+        alpha = 0.3)
+## TPA vs RA
+edgeR.lrt.TPA.vs.RA$FDR[edgeR.lrt.TPA.vs.RA$FDR < 1e-16] <- 1e-16
+volcano(edgeR.lrt.TPA.vs.RA$logFC, 
+        edgeR.lrt.TPA.vs.RA$FDR, effect.low = -1, effect.high = 1,
+        title = "Volcano Plot: TPA vs RA",
+        alpha = 0.3)
+```
+Three volcano plots were generated to compare untreated, TPA-treated, and RA-treated groups. The x-axis of each plot indicates the effect strength measured by the log2-fold change (FC). Notably, a horizontal blue and red line appears due to setting all FDR values < 1e-16 to a constant value of 1e-16 in the code. A higher absolute log FC signifies a more pronounced biological effect, with genes of interest plotted further left or right on the x-axis.
+
+The y-axis displays -log10-transformed p-values, expanding the range of interest from 0 to 0.05. Smaller p-values are positioned higher on the y-axis, indicating greater statistical significance.
+
+In the plots, red dots signify upregulated genes (log FC > 1) with significant changes, while blue dots represent downregulated genes (log FC < -1), also significant. Both colors highlight genes with at least a twofold change in expression and adjusted p-values below 5%, resulting in distinct clusters of red and blue dots that denote gene sets of particular interest.
+
+This pattern is consistent across comparisons of RA versus untreated and TPA versus RA, revealing numerous significant results with low p-values. Overall, the volcano plots effectively visualize genes exhibiting substantial differential expression and statistical significance across different treatment conditions.
+
+```{r}
+ind1 <- (edgeR.lrt.TPA.vs.untr$FDR < 0.05 & 
+          abs(edgeR.lrt.TPA.vs.untr$logFC) > 1)
+ind2 <- (edgeR.lrt.RA.vs.untr$FDR < 0.05 &
+          abs(edgeR.lrt.RA.vs.untr$logFC) > 1)
+ind3 <- (edgeR.lrt.TPA.vs.RA$FDR < 0.05 &
+          abs(edgeR.lrt.TPA.vs.RA$logFC) > 1)
+grid.newpage()
+draw.triple.venn(area1 = sum(ind1), area2 = sum(ind2), area3 = sum(ind3), 
+                 n12 = sum(ind1&ind2), n23 = sum(ind2&ind3), 
+                 n13 = sum(ind1&ind3), n123 = sum(ind1&ind2&ind3),
+                 category = c("TPA vs untr", "RA vs untr", "TPA vs RA"),
+                 fill = c("blue", "red", "green"))
+```
+The Venn diagram displays comparisons among TPA vs. untreated, RA vs. untreated, and TPA vs. RA conditions. Each comparison reveals unique gene sets specific to that condition. A consistent set of 1277 genes is found across all comparisons, indicating shared patterns of gene expression. Additionally, overlaps between comparison pairs include 2154 genes shared between TPA vs. RA and TPA vs. untreated, 821 genes between RA vs. untreated and TPA vs. RA, and 2223 genes between RA vs. untreated and TPA vs. untreated. This visual representation succinctly summarizes the data by illustrating both commonalities and differences in gene expression across the studied conditions.
+
+## Enrichment analysis
+
+```{r}
+## TPA vs untreated
+GeneID <- mapIds(org.Hs.eg.db, keys = rownames(lrt.TPA.vs.untr), 
+                 keytype = "ENSEMBL", column = "ENTREZID")
+go <- goana.DGELRT(lrt.TPA.vs.untr, geneid = GeneID,
+                   species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+kg <- kegga.DGELRT(lrt.TPA.vs.untr, geneid = GeneID,
+                   species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+## RA vs untreated
+GeneID <- mapIds(org.Hs.eg.db, keys = rownames(lrt.RA.vs.untr), 
+                 keytype = "ENSEMBL", column = "ENTREZID")
+go <- goana.DGELRT(lrt.RA.vs.untr, geneid = GeneID,
+                   species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+kg <- kegga.DGELRT(lrt.RA.vs.untr, geneid = GeneID,
+                   species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+## TPA vs RA
+GeneID <- mapIds(org.Hs.eg.db, keys = rownames(lrt.TPA.vs.RA), 
+                 keytype = "ENSEMBL", column = "ENTREZID")
+go <- goana.DGELRT(lrt.TPA.vs.RA, geneid = GeneID,
+                   species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+kg <- kegga.DGELRT(lrt.TPA.vs.RA, geneid = GeneID,
+                   species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+```
+Enrichment analysis enhances experimental data interpretation by integrating statistical results with biological insights. Here’s a summary of its steps:
+
+1.Gene Universe Classification: Initially, all measured genes form the gene universe, which is categorized by biological databases like KEGG and GO based on known functions or relationships. This classification provides an organized understanding of gene functions and pathways.
+
+2. Identification of Interesting Genes: Genes that are statistically significant according to predefined criteria from the initial analysis are singled out.
+
+3. Enrichment Evaluation: Enrichment analysis simulates a random experiment where genes are randomly selected from the universe without replacement. The goal is to compare the observed number of genes in specific functional groups with the expected number by chance. Significant enrichment or depletion in a functional category indicates its potential relevance in the experimental context.
+
+In the experiment, enrichment analysis is applied across all three comparisons (TPA vs. untreated, RA vs. untreated, and TPA vs. RA). For instance, genes associated with the biological process (BP) category "cell communication" show significant differential regulation: 1905 genes are upregulated in TPA vs. untreated (p-value=9.562300e-111) and 1424 genes are upregulated in RA vs. untreated (p-value=7.415083e-62). However, 1335 genes are downregulated in TPA vs. RA (p-value=3.284918e-01)more down regulation in this comparison than upregulation. This differential regulation underscores the biological importance and potential functional impact of these genes within the experimental conditions.
+
+# Analysis with DESeq2
+Now analysis using DEseq2
+Previously we did the analysis with edge, we can compare these 2 methods after DESeq2 analysis. 
+
+## Unspecific filtering
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi,
+                                colData = Samples,
+                                design = ~ Group)
+dds
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds
+```
+Filtering using `DESeqDataSetFromTximport` based on group data, with the sample containing all the required variables, reveals that the dataset dimensions change from 57,240 to 24,272 after filtering. In contrast, filtering in edgeR reduced the dataset to 18,000, indicating that the filtering criteria in DESeq2 might be less stringent.
+
+## Quality control of filtered data
+
+```{r}
+cts0 <- counts(dds)
+cts0[cts0 == 0] <- min(cts0[cts0 != 0])
+boxplot(cts0, log = "y", range = 0, las = 2)
+```
+The graph is not perfectly symmetrical, but the median has shifted closer to 1e+02. Most samples display similar whisker lengths and interquartile ranges (IQRs), with the exception of sample ...894, which shows some variation likely due to sample-specific differences. The upper whisker length is generally greater than the lower whisker length. Except for sample ...894, all samples exhibit comparable IQRs. Similar to edgeR, filtering has positively impacted the distribution, making it more symmetric on the log scale. The median is now nearly centered within the boxes, indicating that the log counts, after filtering out low counts, are quite symmetric.
+
+
+```{r}
+Cor <- cor(counts(dds), method = "spearman")
+par(mar=c(5,6,4,2)+0.1)
+corPlot(Cor, minCor = 0.84, labels = Samples$Run, 
+        title = "Spearman correlation")
+```
+As observed in the filtered dataset dimensions and box plot, DESeq employs less stringent filtering, allowing for more variation. Post-filtering, intra-group similarity ranges from 0.93 to 1, while inter-group similarity ranges from 0.84 to 0.9. Untreated vs. RA shows higher similarity compared to Untreated vs. TPA. Like edgeR, DESeq filtering has increased intra-group similarity, indicating reduced noise. However, the effect is slightly less pronounced than in edgeR. untreated vs. TPA  shows correlation range of approximately 0.84-0.9. untreated vs. RA  shows correlation range of approximately 0.89-0.91. 
+
+```{r}
+meanSdPlot(log(cts0))
+```
+The standard deviation (variance) is not constant, but since we are not assuming a normal distribution, this does not need to be considered. 
+
+## Negative Binomial Modell
+
+```{r}
+dds <- DESeq(dds)
+## TPA vs untreated
+res.TPA.vs.untr <- results(dds, contrast = c("Group", "TPA", "untreated"))
+res.TPA.vs.untr
+sum(res.TPA.vs.untr$padj < 0.05, na.rm = TRUE)
+sum(res.TPA.vs.untr$padj < 0.05 & 
+      abs(res.TPA.vs.untr$log2FoldChange) > 1, na.rm = TRUE)
+## RA vs untreated
+res.RA.vs.untr <- results(dds, contrast = c("Group", "RA", "untreated"))
+res.RA.vs.untr
+sum(res.RA.vs.untr$padj < 0.05, na.rm = TRUE)
+sum(res.RA.vs.untr$padj < 0.05 & 
+      abs(res.RA.vs.untr$log2FoldChange) > 1, na.rm = TRUE)
+## TPA vs RA
+res.RA.vs.TPA <- results(dds, contrast = c("Group", "TPA", "RA"))
+res.RA.vs.TPA
+sum(res.RA.vs.TPA$padj < 0.05, na.rm = TRUE)
+sum(res.RA.vs.TPA$padj < 0.05 & 
+      abs(res.RA.vs.TPA$log2FoldChange) > 1, na.rm = TRUE)
+```
+TPA vs. Untreated: This comparison revealed the most significant differences, with over 11,000 genes showing statistically significant changes (adjusted p-value < 0.05) and more than 7,000 exhibiting a fold change greater than 1, indicating a stronger effect.
+
+RA vs. Untreated: This comparison also identified a substantial number of differentially expressed genes (approximately 9,800 with adjusted p-value < 0.05), but slightly fewer genes showed a strong fold change (> 1) compared to the TPA vs. Untreated comparison.
+
+TPA vs. RA: This comparison showed the least dramatic changes, with about 9,100 genes having significant changes and only around 5,200 showing a strong fold change.
+
+```{r}
+## TPA vs untreated
+res.TPA.vs.untr$padj[res.TPA.vs.untr$padj < 1e-16] <- 1e-16
+res.TPA.vs.untr$padj[is.na(res.TPA.vs.untr$padj)] <- 1
+volcano(res.TPA.vs.untr$log2FoldChange, 
+        res.TPA.vs.untr$padj, effect.low = -1, effect.high = 1,
+        title = "Volcano Plot: TPA vs untreated",
+        alpha = 0.3)
+## RA vs untreated
+res.RA.vs.untr$padj[res.RA.vs.untr$padj < 1e-16] <- 1e-16
+res.RA.vs.untr$padj[is.na(res.RA.vs.untr$padj)] <- 1
+volcano(res.RA.vs.untr$log2FoldChange, 
+        res.RA.vs.untr$padj, effect.low = -1, effect.high = 1,
+        title = "Volcano Plot: RA vs untreated",
+        alpha = 0.3)
+## TPA vs RA
+res.RA.vs.TPA$padj[res.RA.vs.TPA$padj < 1e-16] <- 1e-16
+res.RA.vs.TPA$padj[is.na(res.RA.vs.TPA$padj)] <- 1
+volcano(res.RA.vs.TPA$log2FoldChange, 
+        res.RA.vs.TPA$padj, effect.low = -1, effect.high = 1,
+        title = "Volcano Plot: TPA vs RA",
+        alpha = 0.3)
+```
+A volcano plot is generated for each of the three group comparisons. The TPA vs. Untreated comparison reveals the most significant genes with at least a 2-fold change. Similarly, the TPA vs. RA comparison also shows a significant number of differentially expressed genes, indicating notable differences in the enzymes. TPA and RA both stimulate cell differentialtion and proliferation, so this method is a comparision between them.
+
+```{r}
+ind1 <- (res.TPA.vs.untr$padj < 0.05 & 
+          abs(res.TPA.vs.untr$log2FoldChange) > 1)
+ind2 <- (res.RA.vs.untr$padj < 0.05 &
+          abs(res.RA.vs.untr$log2FoldChange) > 1)
+ind3 <- (res.RA.vs.TPA$padj < 0.05 &
+          abs(res.RA.vs.TPA$log2FoldChange) > 1)
+grid.newpage()
+draw.triple.venn(area1 = sum(ind1), area2 = sum(ind2), area3 = sum(ind3), 
+                 n12 = sum(ind1&ind2), n23 = sum(ind2&ind3), 
+                 n13 = sum(ind1&ind3), n123 = sum(ind1&ind2&ind3),
+                 category = c("TPA vs untr", "RA vs untr", "TPA vs RA"),
+                 fill = c("blue", "red", "green"))
+```
+It highlights a consistent group of 1,239 genes that show changes across all three comparisons, reassuring findings seen in the edgeR analysis.
+
+RA vs. Untreated & TPA vs. Untreated: Share 2,309 genes, indicating a common response to both treatments compared to the untreated group.
+
+RA vs. Untreated & TPA vs. RA: 900 genes overlap, suggesting genes affected by RA treatment also respond (potentially differently) to TPA treatment.
+
+TPA vs. RA & TPA vs. Untreated: Share 2,397 genes, indicating significant gene influence from TPA treatment compared to both untreated and RA-treated samples.
+
+The common genes 1239, those are not that much usefull.
+only TPA v/s untreated group has 1752 which is highest in both of the treatment.
+
+## Enrichment analysis
+
+```{r}
+## TPA vs untreated
+GeneID <- mapIds(org.Hs.eg.db, keys = rownames(res.TPA.vs.untr), 
+                 keytype = "ENSEMBL", column = "ENTREZID")
+EG.DE.UP <- GeneID[(res.TPA.vs.untr$padj < 0.05 & 
+                      res.TPA.vs.untr$log2FoldChange > 0)]
+EG.DE.DN <- GeneID[(res.TPA.vs.untr$padj < 0.05 & 
+                      res.TPA.vs.untr$log2FoldChange < 0)]
+go <- goana(list(Up = EG.DE.UP, Down = EG.DE.DN), 
+            universe = GeneID, species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+kg <- kegga(list(Up = EG.DE.UP, Down = EG.DE.DN), 
+            universe = GeneID, species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+## RA vs untreated
+GeneID <- mapIds(org.Hs.eg.db, keys = rownames(res.RA.vs.untr), 
+                 keytype = "ENSEMBL", column = "ENTREZID")
+EG.DE.UP <- GeneID[(res.RA.vs.untr$padj < 0.05 & 
+                      res.RA.vs.untr$log2FoldChange > 0)]
+EG.DE.DN <- GeneID[(res.RA.vs.untr$padj < 0.05 & 
+                      res.RA.vs.untr$log2FoldChange < 0)]
+go <- goana(list(Up = EG.DE.UP, Down = EG.DE.DN), 
+            universe = GeneID, species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+kg <- kegga(list(Up = EG.DE.UP, Down = EG.DE.DN), 
+            universe = GeneID, species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+## TPA vs RA
+GeneID <- mapIds(org.Hs.eg.db, keys = rownames(res.RA.vs.TPA), 
+                 keytype = "ENSEMBL", column = "ENTREZID")
+EG.DE.UP <- GeneID[(res.RA.vs.TPA$padj < 0.05 & 
+                      res.RA.vs.TPA$log2FoldChange > 0)]
+EG.DE.DN <- GeneID[(res.RA.vs.TPA$padj < 0.05 & 
+                      res.RA.vs.TPA$log2FoldChange < 0)]
+go <- goana(list(Up = EG.DE.UP, Down = EG.DE.DN), 
+            universe = GeneID, species = "Hs")
+topGO(go, sort = "up")
+topGO(go, sort = "down")
+kg <- kegga(list(Up = EG.DE.UP, Down = EG.DE.DN), 
+            universe = GeneID, species = "Hs")
+topKEGG(kg, sort = "up")
+topKEGG(kg, sort = "down")
+```
+In the comparison between TPA vs. untreated cells, the highest number of differentially expressed genes is found in the cellular component category. Specifically, 4724 genes are upregulated and 4069 genes are downregulated in this category. This extensive differential expression suggests significant changes in the structure or function of cellular components under TPA treatment compared to untreated conditions.
+
+Regarding the enrichment analysis performed with edgeR, there are notable differences observed between TPA vs. untreated and RA vs. untreated comparisons compared to the RA vs. TPA comparison. In edgeR analysis, these differences were highlighted in the cellular component (CC) category "cell periphery," indicating potential structural alterations induced by treatments.
+
+Overall, these findings provide valuable insights into the molecular mechanisms influenced by TPA and RA treatments. They underscore how different analytical approaches reveal distinct aspects of gene expression changes, shedding light on the specific biological impacts of these treatments on cellular components and molecular functions.
+
+Comparison: Both DESeq2 and edgeR utilize normalized data for differential expression analysis, but they differ in their preprocessing approaches. DESeq2 generally adopts a more relaxed preprocessing strategy compared to edgeR. Despite these differences, both methods are valuable tools in genomic analysis.
+
+##Explanation:
+
+1. Normalized Data Usage: Both DESeq2 and edgeR operate on normalized data, ensuring that the expression values across samples are adjusted for factors like sequencing depth and gene length. This normalization step is crucial for accurate comparison of gene expression levels.
+
+2. Preprocessing Differences: DESeq2 tends to be more lenient in its preprocessing steps compared to edgeR. This can mean different methods for handling outliers, batch effects, or data transformations before statistical testing. EdgeR, on the other hand, typically employs stricter preprocessing steps, which might include more aggressive filtering or transformation of the data.
+
+In summary, while DESeq2 and edgeR employ normalized data for differential expression analysis, their preprocessing methods differ in stringency. Both methods are valuable in genomic research, providing researchers with complementary tools to analyze gene expression data effectively.
